@@ -14,11 +14,12 @@ import {
   CompiledCircuit,
 } from "@noir-lang/backend_barretenberg";
 import proofOfAgeCircuit from "./circuits/proof_age.json";
-import { gcm } from "@noble/ciphers/aes";
-import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/ciphers/utils";
+import { bytesToHex } from "@noble/ciphers/utils";
 import constants from "./constants";
 import { getWebSocketClient, WebSocketClient } from "./websocket";
 import { createJsonRpcRequest } from "./json-rpc";
+import { decrypt, generateECDHKeyPair, getSharedSecret } from "./encryption";
+import { JsonRpcRequest } from "./types/json-rpc";
 
 function numericalCompare(
   fnName: "gte" | "gt" | "lte" | "lt",
@@ -58,108 +59,6 @@ function generalCompare(
   };
 }
 
-const getZkPassportRequest = (
-  topicToConfig: Record<string, Record<string, IDCredentialConfig>>,
-  domain: string,
-  topic: string
-) => ({
-  eq: <T extends IDCredential>(key: T, value: IDCredentialValue<T>) => {
-    generalCompare("eq", key, value, topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  gte: <T extends NumericalIDCredential>(
-    key: T,
-    value: IDCredentialValue<T>
-  ) => {
-    numericalCompare("gte", key, value, topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  gt: <T extends NumericalIDCredential>(
-    key: T,
-    value: IDCredentialValue<T>
-  ) => {
-    numericalCompare("gt", key, value, topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  lte: <T extends NumericalIDCredential>(
-    key: T,
-    value: IDCredentialValue<T>
-  ) => {
-    numericalCompare("lte", key, value, topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  lt: <T extends NumericalIDCredential>(
-    key: T,
-    value: IDCredentialValue<T>
-  ) => {
-    numericalCompare("lt", key, value, topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  range: <T extends NumericalIDCredential>(
-    key: T,
-    start: IDCredentialValue<T>,
-    end: IDCredentialValue<T>
-  ) => {
-    rangeCompare(key, [start, end], topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  in: <T extends IDCredential>(key: T, value: IDCredentialValue<T>[]) => {
-    generalCompare("in", key, value, topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  out: <T extends IDCredential>(key: T, value: IDCredentialValue<T>[]) => {
-    generalCompare("out", key, value, topic, topicToConfig);
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  checkAML: (country?: CountryName | Alpha2Code | Alpha3Code) => {
-    return getZkPassportRequest(topicToConfig, domain, topic);
-  },
-  getUrl: () => {
-    const base64Config = Buffer.from(
-      JSON.stringify(topicToConfig[topic])
-    ).toString("base64");
-    return `https://zkpassport.id/request?d=${domain}&t=${topic}&c=${base64Config}`;
-  },
-  getRequestId: () => {
-    return topic;
-  },
-});
-
-async function generateECDHKeyPair() {
-  const secp256k1 = await import("@noble/secp256k1");
-  const privKey = secp256k1.utils.randomPrivateKey();
-  const pubKey = secp256k1.getPublicKey(privKey);
-  return {
-    privateKey: privKey,
-    publicKey: pubKey,
-  };
-}
-
-async function getSharedSecret(
-  privateKey: `0x${string}`,
-  publicKey: `0x${string}`
-) {
-  const secp256k1 = await import("@noble/secp256k1");
-  return secp256k1.getSharedSecret(privateKey, publicKey);
-}
-
-function encrypt(message: string, sharedSecret: Uint8Array, topic: string) {
-  const aes = gcm(sharedSecret, hexToBytes(topic));
-  const data = utf8ToBytes(message);
-  const ciphertext = aes.encrypt(data);
-  return ciphertext;
-}
-
-function decrypt(
-  ciphertext: Uint8Array,
-  sharedSecret: Uint8Array,
-  topic: string
-) {
-  const aes = gcm(sharedSecret, hexToBytes(topic));
-  const data = aes.decrypt(ciphertext);
-  return data;
-}
-
 export class ZkPassport {
   private domain: string;
   private topicToConfig: Record<string, Record<string, IDCredentialConfig>> =
@@ -169,11 +68,94 @@ export class ZkPassport {
     { privateKey: Uint8Array; publicKey: Uint8Array }
   > = {};
   private topicToWebSocketClient: Record<string, WebSocketClient> = {};
+  private topicToSharedSecret: Record<string, Uint8Array> = {};
 
   constructor(_domain: string) {
     this.domain = _domain;
   }
 
+  private getZkPassportRequest(topic: string) {
+    return {
+      eq: <T extends IDCredential>(key: T, value: IDCredentialValue<T>) => {
+        generalCompare("eq", key, value, topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      gte: <T extends NumericalIDCredential>(
+        key: T,
+        value: IDCredentialValue<T>
+      ) => {
+        numericalCompare("gte", key, value, topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      gt: <T extends NumericalIDCredential>(
+        key: T,
+        value: IDCredentialValue<T>
+      ) => {
+        numericalCompare("gt", key, value, topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      lte: <T extends NumericalIDCredential>(
+        key: T,
+        value: IDCredentialValue<T>
+      ) => {
+        numericalCompare("lte", key, value, topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      lt: <T extends NumericalIDCredential>(
+        key: T,
+        value: IDCredentialValue<T>
+      ) => {
+        numericalCompare("lt", key, value, topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      range: <T extends NumericalIDCredential>(
+        key: T,
+        start: IDCredentialValue<T>,
+        end: IDCredentialValue<T>
+      ) => {
+        rangeCompare(key, [start, end], topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      in: <T extends IDCredential>(key: T, value: IDCredentialValue<T>[]) => {
+        generalCompare("in", key, value, topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      out: <T extends IDCredential>(key: T, value: IDCredentialValue<T>[]) => {
+        generalCompare("out", key, value, topic, this.topicToConfig);
+        return this.getZkPassportRequest(topic);
+      },
+      checkAML: (country?: CountryName | Alpha2Code | Alpha3Code) => {
+        return this.getZkPassportRequest(topic);
+      },
+      done: () => {
+        const base64Config = Buffer.from(
+          JSON.stringify(this.topicToConfig[topic])
+        ).toString("base64");
+        const pubkey = bytesToHex(this.topicToKeyPair[topic].publicKey);
+        return {
+          url: `https://zkpassport.id/request?d=${this.domain}&t=${topic}&c=${base64Config}&p=${pubkey}`,
+          requestId: topic,
+          onQRCodeScanned: (callback: () => void) => {
+            this.onQRCodeScanned(topic, callback);
+          },
+          onGeneratingProof: (callback: () => void) => {
+            this.onGeneratingProof(topic, callback);
+          },
+          onSuccess: (callback: (proof: ProofData) => void) => {
+            this.onSuccess(topic, callback);
+          },
+          onError: (callback: (error: any) => void) => {
+            this.onError(topic, callback);
+          },
+        };
+      },
+    };
+  }
+
+  /**
+   * @notice Create a new request.
+   * @returns The query builder object.
+   */
   public async request() {
     const keyPair = await generateECDHKeyPair();
     const topic = randomBytes(16).toString("hex");
@@ -196,15 +178,29 @@ export class ZkPassport {
         )
       );
     };
-    wsClient.onmessage = (event: MessageEvent) => {
+    wsClient.addEventListener("message", async (event: any) => {
       console.log("Received message:", event.data);
-    };
+      try {
+        const data: JsonRpcRequest = JSON.parse(event.data);
+        if (data.method === "handshake") {
+          this.topicToSharedSecret[topic] = await getSharedSecret(
+            bytesToHex(keyPair.privateKey),
+            data.params.pubkey
+          );
+        }
+      } catch (error) {}
+    });
     wsClient.onerror = (error: Event) => {
       console.error("WebSocket error:", error);
     };
-    return getZkPassportRequest(this.topicToConfig, this.domain, topic);
+    return this.getZkPassportRequest(topic);
   }
 
+  /**
+   * @notice Verifies a proof.
+   * @param proof The proof to verify.
+   * @returns True if the proof is valid, false otherwise.
+   */
   public verify(proof: Proof) {
     const backend = new UltraHonkBackend(proofOfAgeCircuit as CompiledCircuit);
     const proofData: ProofData = {
@@ -214,8 +210,99 @@ export class ZkPassport {
     return backend.verifyProof(proofData);
   }
 
-  public getUrl(topic: string) {
-    return `https://zkpassport.id/request?d=${this.domain}&t=${topic}&c=${this.topicToConfig[topic]}`;
+  /**
+   * @notice Returns the URL of the request.
+   * @param requestId The request ID.
+   * @returns The URL of the request.
+   */
+  public getUrl(requestId: string) {
+    const pubkey = bytesToHex(this.topicToKeyPair[requestId].publicKey);
+    return `https://zkpassport.id/request?d=${this.domain}&t=${requestId}&c=${this.topicToConfig[requestId]}&p=${pubkey}`;
+  }
+
+  /**
+   * @notice Cancels a request by closing the WebSocket connection and deleting the associated data.
+   * @param requestId The request ID.
+   */
+  public cancelRequest(requestId: string) {
+    this.topicToWebSocketClient[requestId].close();
+    delete this.topicToWebSocketClient[requestId];
+    delete this.topicToKeyPair[requestId];
+    delete this.topicToConfig[requestId];
+  }
+
+  private handleMessage(topic: string, cipher: any, method: string) {
+    const dataString = decrypt(cipher, this.topicToSharedSecret[topic], topic);
+    const data: JsonRpcRequest = JSON.parse(dataString);
+    if (data.method === method) {
+      return data;
+    }
+  }
+
+  private checkIfRequestExists(topic: string) {
+    if (!this.topicToWebSocketClient[topic]) {
+      throw new Error("Request not found");
+    }
+  }
+
+  public onQRCodeScanned(topic: string, callback: () => void) {
+    this.checkIfRequestExists(topic);
+    this.topicToWebSocketClient[topic].addEventListener(
+      "message",
+      (event: any) => {
+        const data = this.handleMessage(
+          topic,
+          event.data,
+          "on_qr_code_scanned"
+        );
+        if (data) {
+          callback();
+        }
+      }
+    );
+  }
+
+  public onGeneratingProof(topic: string, callback: () => void) {
+    this.checkIfRequestExists(topic);
+    this.topicToWebSocketClient[topic].addEventListener(
+      "message",
+      (event: any) => {
+        const data = this.handleMessage(
+          topic,
+          event.data,
+          "on_generating_proof"
+        );
+        if (data) {
+          callback();
+        }
+      }
+    );
+  }
+
+  public onSuccess(topic: string, callback: (proof: ProofData) => void) {
+    this.checkIfRequestExists(topic);
+    this.topicToWebSocketClient[topic].addEventListener(
+      "message",
+      (event: any) => {
+        const data = this.handleMessage(topic, event.data, "on_success");
+        if (data) {
+          callback(data.params);
+        }
+      }
+    );
+  }
+
+  public onError(topic: string, callback: (error: any) => void) {
+    this.checkIfRequestExists(topic);
+    this.topicToWebSocketClient[topic].addEventListener(
+      "message",
+      (event: any) => {
+        const data = this.handleMessage(topic, event.data, "on_error");
+        if (data) {
+          callback(data.params);
+        }
+      }
+    );
   }
 }
 
@@ -234,13 +321,20 @@ TUR -> 84 117 114
 async function main() {
   const queryBuilder = await zkPassport.request();
 
-  const url = queryBuilder
+  const {
+    url,
+    requestId,
+    onQRCodeScanned,
+    onGeneratingProof,
+    onSuccess,
+    onError,
+  } = queryBuilder
     .eq("fullname", "John Doe")
     .range("age", 18, 25)
     .in("nationality", ["USA", "GBR", "Germany", "Canada", "Portugal"])
     .out("nationality", constants.countries.SANCTIONED)
     .checkAML()
-    .getUrl();
+    .done();
 
   console.log(url);
 }
