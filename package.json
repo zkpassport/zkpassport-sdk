@@ -1,0 +1,28 @@
+{
+  "name": "zkpassport-sdk",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc",
+    "prepare": "npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.0.0",
+    "@noble/secp256k1": "^2.1.0",
+    "@noir-lang/backend_barretenberg": "^0.34.0",
+    "@noir-lang/noir_js": "^0.34.0",
+    "i18n-iso-countries": "^7.12.0",
+    "ws": "^8.18.0"
+  }
+}
