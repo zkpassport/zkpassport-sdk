@@ -45,16 +45,19 @@ onGeneratingProof(() => {
   console.log('Generating proof')
 })
 
-onProofGenerated((result: ProofResult) => {
-  // The proof has been generated
-  // You can retrieve the proof, the verification key and the result of your query
+onProofGenerated(({ proof, vkeyHash }: ProofResult) => {
+  // One of the proofs has been generated
+  // You can retrieve the proof and the verification key hash (to be mapped to the actual vkey)
   // Note: the verify function will soon be added to the SDK so you can verify the proof
   // directly
-  console.log('Proof', result.proof)
-  console.log('Verification key', result.verificationKey)
-  console.log('Query result', result.queryResult)
-  console.log('firstname', result.queryResult.firstname.disclose.result)
-  console.log('nationality', result.queryResult.nationality.disclose.result)
+  console.log('Proof generated', proof)
+  console.log('Verification key hash', vkeyHash)
+})
+
+onFinalResult((result: QueryResult) => {
+  // All the proofs have been generated and the final result is available
+  console.log('firstname', result.firstname.disclose.result)
+  console.log('nationality', result.nationality.disclose.result)
 })
 ```
 

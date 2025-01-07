@@ -43,7 +43,6 @@ export type QueryResult = {
 }
 
 export type ProofResult = {
-  queryResult: QueryResult
   proof?: string
-  verificationKey?: string
+  vkeyHash?: string
 }

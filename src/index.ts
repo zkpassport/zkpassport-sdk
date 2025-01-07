@@ -7,7 +7,7 @@ import {
   IDCredentialValue,
   NumericalIDCredential,
 } from './types/credentials'
-import { ProofResult } from './types/query-result'
+import { ProofResult, QueryResult } from './types/query-result'
 import { CountryName } from './types/countries'
 //import { UltraHonkBackend, ProofData, CompiledCircuit } from '@noir-lang/backend_barretenberg'
 import { bytesToHex } from '@noble/ciphers/utils'
@@ -78,7 +78,8 @@ export class ZkPassport {
   private onQRCodeScannedCallbacks: Record<string, Array<() => void>> = {}
   private onGeneratingProofCallbacks: Record<string, Array<(topic: string) => void>> = {}
   private onBridgeConnectCallbacks: Record<string, Array<() => void>> = {}
-  private onProofGeneratedCallbacks: Record<string, Array<(result: ProofResult) => void>> = {}
+  private onProofGeneratedCallbacks: Record<string, Array<(proof: ProofResult) => void>> = {}
+  private onFinalResultCallbacks: Record<string, Array<(result: QueryResult) => void>> = {}
   private onRejectCallbacks: Record<string, Array<() => void>> = {}
   private onErrorCallbacks: Record<string, Array<(topic: string) => void>> = {}
   private topicToService: Record<string, { name: string; logo: string; purpose: string }> = {}
@@ -103,9 +104,12 @@ export class ZkPassport {
     } else if (request.method === 'reject') {
       logger.debug(`User rejected the request`)
       await Promise.all(this.onRejectCallbacks[topic].map((callback) => callback()))
-    } else if (request.method === 'done') {
+    } else if (request.method === 'proof') {
       logger.debug(`User generated proof`)
-      await Promise.all(this.onProofGeneratedCallbacks[topic].map((callback) => callback(request.params.result)))
+      await Promise.all(this.onProofGeneratedCallbacks[topic].map((callback) => callback(request.params)))
+    } else if (request.method === 'done') {
+      logger.debug(`User sent the final result`)
+      await Promise.all(this.onFinalResultCallbacks[topic].map((callback) => callback(request.params)))
     } else if (request.method === 'error') {
       await Promise.all(this.onErrorCallbacks[topic].map((callback) => callback(request.params.error)))
     }
@@ -174,8 +178,9 @@ export class ZkPassport {
           onQRCodeScanned: (callback: () => void) => this.onQRCodeScannedCallbacks[topic].push(callback),
           onGeneratingProof: (callback: () => void) => this.onGeneratingProofCallbacks[topic].push(callback),
           onBridgeConnect: (callback: () => void) => this.onBridgeConnectCallbacks[topic].push(callback),
-          onProofGenerated: (callback: (result: ProofResult) => void) =>
+          onProofGenerated: (callback: (proof: ProofResult) => void) =>
             this.onProofGeneratedCallbacks[topic].push(callback),
+          onFinalResult: (callback: (result: QueryResult) => void) => this.onFinalResultCallbacks[topic].push(callback),
           onReject: (callback: () => void) => this.onRejectCallbacks[topic].push(callback),
           onError: (callback: (error: string) => void) => this.onErrorCallbacks[topic].push(callback),
           isBridgeConnected: () => this.topicToWebSocketClient[topic].readyState === WebSocket.OPEN,
@@ -217,6 +222,7 @@ export class ZkPassport {
     this.onGeneratingProofCallbacks[topic] = []
     this.onBridgeConnectCallbacks[topic] = []
     this.onProofGeneratedCallbacks[topic] = []
+    this.onFinalResultCallbacks[topic] = []
     this.onRejectCallbacks[topic] = []
     this.onErrorCallbacks[topic] = []
 
