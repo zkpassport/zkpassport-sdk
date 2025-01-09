@@ -9,10 +9,10 @@ npm install @zkpassport/sdk
 ## How to use
 
 ```ts
-import { ZkPassport } from '@zkpassport/sdk'
+import { ZKPassport } from '@zkpassport/sdk'
 
 // Replace with your domain
-const zkPassport = new ZkPassport('demo.zkpassport.id')
+const zkPassport = new ZKPassport('demo.zkpassport.id')
 
 // Specify your app name, logo and the purpose of the request
 // you'll send to your visitors or users

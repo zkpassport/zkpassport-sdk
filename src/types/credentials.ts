@@ -12,6 +12,7 @@ export type DisclosableIDCredential =
   | 'document_type'
   | 'issuing_country'
   | 'gender'
+  | 'age'
 
 export type NumericalIDCredential = 'age' | 'birthdate' | 'expiry_date'
 

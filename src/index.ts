@@ -67,13 +67,15 @@ function generalCompare(
 export * from './constants'
 export * from './types'
 
-export class ZkPassport {
+export class ZKPassport {
   private domain: string
   private topicToConfig: Record<string, Record<string, IDCredentialConfig>> = {}
   private topicToKeyPair: Record<string, { privateKey: Uint8Array; publicKey: Uint8Array }> = {}
   private topicToWebSocketClient: Record<string, WebSocketClient> = {}
   private topicToSharedSecret: Record<string, Uint8Array> = {}
   private topicToQRCodeScanned: Record<string, boolean> = {}
+  private topicToService: Record<string, { name: string; logo: string; purpose: string; scope?: string }> = {}
+  private topicToProofs: Record<string, Array<ProofResult>> = {}
 
   private onQRCodeScannedCallbacks: Record<string, Array<() => void>> = {}
   private onGeneratingProofCallbacks: Record<string, Array<(topic: string) => void>> = {}
@@ -82,7 +84,6 @@ export class ZkPassport {
   private onFinalResultCallbacks: Record<string, Array<(result: QueryResult) => void>> = {}
   private onRejectCallbacks: Record<string, Array<() => void>> = {}
   private onErrorCallbacks: Record<string, Array<(topic: string) => void>> = {}
-  private topicToService: Record<string, { name: string; logo: string; purpose: string }> = {}
 
   constructor(_domain?: string) {
     if (!_domain && typeof window === 'undefined') {
@@ -106,6 +107,7 @@ export class ZkPassport {
       await Promise.all(this.onRejectCallbacks[topic].map((callback) => callback()))
     } else if (request.method === 'proof') {
       logger.debug(`User generated proof`)
+      this.topicToProofs[topic].push(request.params)
       await Promise.all(this.onProofGeneratedCallbacks[topic].map((callback) => callback(request.params)))
     } else if (request.method === 'done') {
       logger.debug(`User sent the final result`)
@@ -124,37 +126,33 @@ export class ZkPassport {
         generalCompare('eq', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      gte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
+      gte: <T extends 'age'>(key: T, value: IDCredentialValue<T>) => {
         numericalCompare('gte', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      gt: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
+      /*gt: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
         numericalCompare('gt', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
-      },
-      lte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
+      },*/
+      /*lte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
         numericalCompare('lte', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
-      },
-      lt: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
+      },*/
+      lt: <T extends 'age'>(key: T, value: IDCredentialValue<T>) => {
         numericalCompare('lt', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      range: <T extends NumericalIDCredential>(key: T, start: IDCredentialValue<T>, end: IDCredentialValue<T>) => {
+      range: <T extends 'age'>(key: T, start: IDCredentialValue<T>, end: IDCredentialValue<T>) => {
         rangeCompare(key, [start, end], topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      in: <T extends IDCredential>(key: T, value: IDCredentialValue<T>[]) => {
-        if (key === 'issuing_country' || key === 'nationality') {
-          value = value.map((v) => normalizeCountry(v as CountryName)) as IDCredentialValue<T>[]
-        }
+      in: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => {
+        value = value.map((v) => normalizeCountry(v as CountryName)) as IDCredentialValue<T>[]
         generalCompare('in', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      out: <T extends IDCredential>(key: T, value: IDCredentialValue<T>[]) => {
-        if (key === 'issuing_country' || key === 'nationality') {
-          value = value.map((v) => normalizeCountry(v as CountryName)) as IDCredentialValue<T>[]
-        }
+      out: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => {
+        value = value.map((v) => normalizeCountry(v as CountryName)) as IDCredentialValue<T>[]
         generalCompare('out', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
@@ -198,12 +196,14 @@ export class ZkPassport {
     name,
     logo,
     purpose,
+    scope,
     topicOverride,
     keyPairOverride,
   }: {
     name: string
     logo: string
     purpose: string
+    scope?: string
     topicOverride?: string
     keyPairOverride?: { privateKey: Uint8Array; publicKey: Uint8Array }
   }) {
@@ -216,7 +216,8 @@ export class ZkPassport {
     }
 
     this.topicToConfig[topic] = {}
-    this.topicToService[topic] = { name, logo, purpose }
+    this.topicToService[topic] = { name, logo, purpose, scope }
+    this.topicToProofs[topic] = []
 
     this.onQRCodeScannedCallbacks[topic] = []
     this.onGeneratingProofCallbacks[topic] = []
@@ -286,19 +287,25 @@ export class ZkPassport {
   }
 
   /**
-   * @notice Verifies a proof.
-   * @param proof The proof to verify.
-   * @returns True if the proof is valid, false otherwise.
+   * @notice Verify the proofs received from the mobile app.
+   * @param requestId The request ID.
+   * @param proofs The proofs to verify.
+   * @returns True if the proofs are valid, false otherwise.
    */
-  /*public verify(result: ProofResult) {
-    const backend = new UltraHonkBackend(proofOfAgeCircuit as CompiledCircuit)
+  public verify(requestId: string, proofs?: Array<ProofResult>) {
+    let proofsToVerify = proofs
+    if (!proofs) {
+      proofsToVerify = this.topicToProofs[requestId]
+    }
+    /*const backend = new UltraHonkBackend(proofOfAgeCircuit as CompiledCircuit)
     const proofData: ProofData = {
       proof: Buffer.from(result.proof as string, 'hex'),
       // TODO: extract the public inputs from the proof
       publicInputs: [],
     }
-    return backend.verifyProof(proofData)
-  }*/
+    return backend.verifyProof(proofData)*/
+    delete this.topicToProofs[requestId]
+  }
 
   /**
    * @notice Returns the URL of the request.
@@ -322,6 +329,7 @@ export class ZkPassport {
     delete this.topicToKeyPair[requestId]
     delete this.topicToConfig[requestId]
     delete this.topicToSharedSecret[requestId]
+    delete this.topicToProofs[requestId]
     this.onQRCodeScannedCallbacks[requestId] = []
     this.onGeneratingProofCallbacks[requestId] = []
     this.onBridgeConnectCallbacks[requestId] = []
