@@ -19,8 +19,11 @@ const zkPassport = new ZKPassport('demo.zkpassport.id')
 const queryBuilder = await zkPassport.request({
   name: 'ZKPassport',
   logo: 'https://zkpassport.id/logo.png',
-  purpose: 'Proof of country and first name',
-  scope: 'Adult from the EU but not Scandinavian countries',
+  purpose: 'Prove you are an adult from the EU but not from Scandinavia',
+  // The scope is optional and can be used to scope the nullifier
+  // of the proof to a specific use case
+  // By default, the nullifier is scoped to your domain name only
+  scope: 'eu-adult-not-scandinavia',
 })
 
 // Specify the data you want to disclose
@@ -64,7 +67,7 @@ onFinalResult((result: QueryResult) => {
   console.log('firstname', result.firstname.disclose.result)
   console.log('age over 18', result.age.gte.result)
   console.log('nationality in EU', result.nationality.in.result)
-  console.log('nationality not in US, UK, Canada', result.nationality.out.result)
+  console.log('nationality not from Scandinavia', result.nationality.out.result)
   // You can also retrieved what where the values originally requested
   console.log('age over', result.age.gte.expected)
   console.log('nationality in', result.nationality.in.expected)
