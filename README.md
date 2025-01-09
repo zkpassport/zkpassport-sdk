@@ -9,7 +9,7 @@ npm install @zkpassport/sdk
 ## How to use
 
 ```ts
-import { ZKPassport } from '@zkpassport/sdk'
+import { ZKPassport, EU_COUNTRIES } from '@zkpassport/sdk'
 
 // Replace with your domain
 const zkPassport = new ZKPassport('demo.zkpassport.id')
@@ -17,17 +17,22 @@ const zkPassport = new ZKPassport('demo.zkpassport.id')
 // Specify your app name, logo and the purpose of the request
 // you'll send to your visitors or users
 const queryBuilder = await zkPassport.request({
-  name: 'ZKpassport',
+  name: 'ZKPassport',
   logo: 'https://zkpassport.id/logo.png',
   purpose: 'Proof of country and first name',
+  scope: 'Adult from the EU but not Scandinavian countries',
 })
 
 // Specify the data you want to disclose
 // Then you can call the `done` method to get the url and the callbacks to follow the progress
 // and get back the result along with the proof
+// The example below requests to disclose the firstname, prove the user is at least 18 years old,
+// prove the user is from the EU but not from a Scandinavian country (note that Norway is not in the EU)
 const { url, requestId, onQRCodeScanned, onGeneratingProof, onProofGenerated, onReject, onError } = queryBuilder
-  .disclose('nationality')
   .disclose('firstname')
+  .gte('age', 18)
+  .in('nationality', EU_COUNTRIES)
+  .out('nationality', ['Sweden', 'Denmark'])
   .done()
 
 // Generate a url with the url and let your user scan it
@@ -57,7 +62,13 @@ onProofGenerated(({ proof, vkeyHash }: ProofResult) => {
 onFinalResult((result: QueryResult) => {
   // All the proofs have been generated and the final result is available
   console.log('firstname', result.firstname.disclose.result)
-  console.log('nationality', result.nationality.disclose.result)
+  console.log('age over 18', result.age.gte.result)
+  console.log('nationality in EU', result.nationality.in.result)
+  console.log('nationality not in US, UK, Canada', result.nationality.out.result)
+  // You can also retrieved what where the values originally requested
+  console.log('age over', result.age.gte.expected)
+  console.log('nationality in', result.nationality.in.expected)
+  console.log('nationality not in', result.nationality.out.expected)
 })
 ```
 
@@ -71,12 +82,12 @@ You can integrate `@zkpassport/sdk` into a Next.js application by creating a bac
 
 ```typescript
 import { NextResponse } from 'next/server'
-import { ZkPassport } from '@zkpassport/sdk'
+import { ZKPassport } from '@zkpassport/sdk'
 
 export async function GET() {
-  const zkPassport = new ZkPassport('demo.zkpassport.id') // Replace with your domain
+  const zkPassport = new ZKPassport('demo.zkpassport.id') // Replace with your domain
   const queryBuilder = await zkPassport.request({
-    name: 'ZKpassport Demo',
+    name: 'ZKPassport Demo',
     logo: 'https://via.placeholder.com/150',
     purpose: 'Verify user nationality and first name',
   })
