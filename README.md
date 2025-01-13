@@ -31,7 +31,16 @@ const queryBuilder = await zkPassport.request({
 // and get back the result along with the proof
 // The example below requests to disclose the firstname, prove the user is at least 18 years old,
 // prove the user is from the EU but not from a Scandinavian country (note that Norway is not in the EU)
-const { url, requestId, onQRCodeScanned, onGeneratingProof, onProofGenerated, onReject, onError } = queryBuilder
+const {
+  url,
+  requestId,
+  onQRCodeScanned,
+  onGeneratingProof,
+  onProofGenerated,
+  onFinalResult,
+  onReject,
+  onError,
+} = queryBuilder
   .disclose('firstname')
   .gte('age', 18)
   .in('nationality', EU_COUNTRIES)
@@ -68,7 +77,7 @@ onFinalResult((result: QueryResult) => {
   console.log('age over 18', result.age.gte.result)
   console.log('nationality in EU', result.nationality.in.result)
   console.log('nationality not from Scandinavia', result.nationality.out.result)
-  // You can also retrieved what where the values originally requested
+  // You can also retrieved what were the values originally requested
   console.log('age over', result.age.gte.expected)
   console.log('nationality in', result.nationality.in.expected)
   console.log('nationality not in', result.nationality.out.expected)

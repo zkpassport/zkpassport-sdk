@@ -74,7 +74,10 @@ export class ZKPassport {
   private topicToWebSocketClient: Record<string, WebSocketClient> = {}
   private topicToSharedSecret: Record<string, Uint8Array> = {}
   private topicToQRCodeScanned: Record<string, boolean> = {}
-  private topicToService: Record<string, { name: string; logo: string; purpose: string; scope?: string }> = {}
+  private topicToService: Record<
+    string,
+    { name: string; logo: string; purpose: string; scope?: string }
+  > = {}
   private topicToProofs: Record<string, Array<ProofResult>> = {}
 
   private onQRCodeScannedCallbacks: Record<string, Array<() => void>> = {}
@@ -97,7 +100,11 @@ export class ZKPassport {
    * @param request The request.
    * @param outerRequest The outer request.
    */
-  private async handleEncryptedMessage(topic: string, request: JsonRpcRequest, outerRequest: JsonRpcRequest) {
+  private async handleEncryptedMessage(
+    topic: string,
+    request: JsonRpcRequest,
+    outerRequest: JsonRpcRequest,
+  ) {
     logger.debug('Received encrypted message:', request)
     if (request.method === 'accept') {
       logger.debug(`User accepted the request and is generating a proof`)
@@ -108,12 +115,18 @@ export class ZKPassport {
     } else if (request.method === 'proof') {
       logger.debug(`User generated proof`)
       this.topicToProofs[topic].push(request.params)
-      await Promise.all(this.onProofGeneratedCallbacks[topic].map((callback) => callback(request.params)))
+      await Promise.all(
+        this.onProofGeneratedCallbacks[topic].map((callback) => callback(request.params)),
+      )
     } else if (request.method === 'done') {
       logger.debug(`User sent the final result`)
-      await Promise.all(this.onFinalResultCallbacks[topic].map((callback) => callback(request.params)))
+      await Promise.all(
+        this.onFinalResultCallbacks[topic].map((callback) => callback(request.params)),
+      )
     } else if (request.method === 'error') {
-      await Promise.all(this.onErrorCallbacks[topic].map((callback) => callback(request.params.error)))
+      await Promise.all(
+        this.onErrorCallbacks[topic].map((callback) => callback(request.params.error)),
+      )
     }
   }
 
@@ -126,7 +139,7 @@ export class ZKPassport {
         generalCompare('eq', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      gte: <T extends 'age'>(key: T, value: IDCredentialValue<T>) => {
+      gte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
         numericalCompare('gte', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
@@ -134,15 +147,19 @@ export class ZKPassport {
         numericalCompare('gt', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },*/
-      /*lte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => {
+      lte: <T extends 'birthdate' | 'expiry_date'>(key: T, value: IDCredentialValue<T>) => {
         numericalCompare('lte', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
-      },*/
+      },
       lt: <T extends 'age'>(key: T, value: IDCredentialValue<T>) => {
         numericalCompare('lt', key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      range: <T extends 'age'>(key: T, start: IDCredentialValue<T>, end: IDCredentialValue<T>) => {
+      range: <T extends NumericalIDCredential>(
+        key: T,
+        start: IDCredentialValue<T>,
+        end: IDCredentialValue<T>,
+      ) => {
         rangeCompare(key, [start, end], topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
@@ -167,20 +184,29 @@ export class ZKPassport {
         return this.getZkPassportRequest(topic)
       },*/
       done: () => {
-        const base64Config = Buffer.from(JSON.stringify(this.topicToConfig[topic])).toString('base64')
-        const base64Service = Buffer.from(JSON.stringify(this.topicToService[topic])).toString('base64')
+        const base64Config = Buffer.from(JSON.stringify(this.topicToConfig[topic])).toString(
+          'base64',
+        )
+        const base64Service = Buffer.from(JSON.stringify(this.topicToService[topic])).toString(
+          'base64',
+        )
         const pubkey = bytesToHex(this.topicToKeyPair[topic].publicKey)
         return {
           url: `https://zkpassport.id/r?d=${this.domain}&t=${topic}&c=${base64Config}&s=${base64Service}&p=${pubkey}`,
           requestId: topic,
-          onQRCodeScanned: (callback: () => void) => this.onQRCodeScannedCallbacks[topic].push(callback),
-          onGeneratingProof: (callback: () => void) => this.onGeneratingProofCallbacks[topic].push(callback),
-          onBridgeConnect: (callback: () => void) => this.onBridgeConnectCallbacks[topic].push(callback),
+          onQRCodeScanned: (callback: () => void) =>
+            this.onQRCodeScannedCallbacks[topic].push(callback),
+          onGeneratingProof: (callback: () => void) =>
+            this.onGeneratingProofCallbacks[topic].push(callback),
+          onBridgeConnect: (callback: () => void) =>
+            this.onBridgeConnectCallbacks[topic].push(callback),
           onProofGenerated: (callback: (proof: ProofResult) => void) =>
             this.onProofGeneratedCallbacks[topic].push(callback),
-          onFinalResult: (callback: (result: QueryResult) => void) => this.onFinalResultCallbacks[topic].push(callback),
+          onFinalResult: (callback: (result: QueryResult) => void) =>
+            this.onFinalResultCallbacks[topic].push(callback),
           onReject: (callback: () => void) => this.onRejectCallbacks[topic].push(callback),
-          onError: (callback: (error: string) => void) => this.onErrorCallbacks[topic].push(callback),
+          onError: (callback: (error: string) => void) =>
+            this.onErrorCallbacks[topic].push(callback),
           isBridgeConnected: () => this.topicToWebSocketClient[topic].readyState === WebSocket.OPEN,
           isQRCodeScanned: () => this.topicToQRCodeScanned[topic] === true,
         }
@@ -242,8 +268,14 @@ export class ZKPassport {
           logger.debug('[frontend] Received handshake:', event.data)
 
           this.topicToQRCodeScanned[topic] = true
-          this.topicToSharedSecret[topic] = await getSharedSecret(bytesToHex(keyPair.privateKey), data.params.pubkey)
-          logger.debug('[frontend] Shared secret:', Buffer.from(this.topicToSharedSecret[topic]).toString('hex'))
+          this.topicToSharedSecret[topic] = await getSharedSecret(
+            bytesToHex(keyPair.privateKey),
+            data.params.pubkey,
+          )
+          logger.debug(
+            '[frontend] Shared secret:',
+            Buffer.from(this.topicToSharedSecret[topic]).toString('hex'),
+          )
 
           const encryptedMessage = await createEncryptedJsonRpcRequest(
             'hello',
@@ -314,8 +346,12 @@ export class ZKPassport {
    */
   public getUrl(requestId: string) {
     const pubkey = bytesToHex(this.topicToKeyPair[requestId].publicKey)
-    const base64Config = Buffer.from(JSON.stringify(this.topicToConfig[requestId])).toString('base64')
-    const base64Service = Buffer.from(JSON.stringify(this.topicToService[requestId])).toString('base64')
+    const base64Config = Buffer.from(JSON.stringify(this.topicToConfig[requestId])).toString(
+      'base64',
+    )
+    const base64Service = Buffer.from(JSON.stringify(this.topicToService[requestId])).toString(
+      'base64',
+    )
     return `https://zkpassport.id/r?d=${this.domain}&t=${requestId}&c=${base64Config}&s=${base64Service}&p=${pubkey}`
   }
 
