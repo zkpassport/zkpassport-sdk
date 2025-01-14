@@ -1,20 +1,21 @@
 import { randomBytes } from 'crypto'
 import { Alpha3Code, getAlpha3Code, registerLocale } from 'i18n-iso-countries'
-import {
+import type {
   DisclosableIDCredential,
   IDCredential,
   IDCredentialConfig,
   IDCredentialValue,
   NumericalIDCredential,
-} from './types/credentials'
-import { ProofResult, QueryResult } from './types/query-result'
-import { CountryName } from './types/countries'
+  ProofResult,
+  QueryResult,
+  CountryName,
+  JsonRpcRequest,
+} from '@zkpassport/utils'
 //import { UltraHonkBackend, ProofData, CompiledCircuit } from '@noir-lang/backend_barretenberg'
 import { bytesToHex } from '@noble/ciphers/utils'
 import { getWebSocketClient, WebSocketClient } from './websocket'
 import { createEncryptedJsonRpcRequest } from './json-rpc'
 import { decrypt, generateECDHKeyPair, getSharedSecret } from './encryption'
-import { JsonRpcRequest } from './types/json-rpc'
 import logger from './logger'
 
 registerLocale(require('i18n-iso-countries/langs/en.json'))
@@ -64,8 +65,15 @@ function generalCompare(
   }
 }
 
-export * from './constants'
-export * from './types'
+export type * from '@zkpassport/utils'
+export {
+  EU_COUNTRIES,
+  EEA_COUNTRIES,
+  SCHENGEN_COUNTRIES,
+  ASEAN_COUNTRIES,
+  MERCOSUR_COUNTRIES,
+  SANCTIONED_COUNTRIES,
+} from '@zkpassport/utils'
 
 export class ZKPassport {
   private domain: string
