@@ -11,12 +11,40 @@ import type {
   CountryName,
   JsonRpcRequest,
 } from '@zkpassport/utils'
-//import { UltraHonkBackend, ProofData, CompiledCircuit } from '@noir-lang/backend_barretenberg'
-import { bytesToHex } from '@noble/ciphers/utils'
+//import { BarretenbergVerifier, ProofData } from '@aztec/bb.js'
+import { bytesToHex, hexToBytes } from '@noble/ciphers/utils'
 import { getWebSocketClient, WebSocketClient } from './websocket'
 import { createEncryptedJsonRpcRequest } from './json-rpc'
 import { decrypt, generateECDHKeyPair, getSharedSecret } from './encryption'
 import logger from './logger'
+import { ungzip } from 'node-gzip'
+
+function proofToFields(proof: string) {
+  // Convert hex string to bytes
+  const bytes = Buffer.from(proof, 'hex')
+
+  // Start from index 4 and chunk into 32-byte segments
+  const fields: Buffer[] = []
+  for (let i = 4; i < bytes.length; i += 32) {
+    fields.push(bytes.subarray(i, i + 32))
+  }
+
+  return fields.map((field) => field.toString('hex'))
+}
+
+function getNumberOfPublicInputs(proofAsFields: string[]) {
+  return parseInt(proofAsFields[1], 16)
+}
+
+function getPublicInputs(proofAsFields: string[]) {
+  const publicInputsNumber = getNumberOfPublicInputs(proofAsFields)
+  return proofAsFields.slice(3, publicInputsNumber + 3)
+}
+
+function getProof(proofAsFields: string[]) {
+  const publicInputsNumber = getNumberOfPublicInputs(proofAsFields)
+  return [...proofAsFields.slice(0, 3), ...proofAsFields.slice(publicInputsNumber + 3)]
+}
 
 registerLocale(require('i18n-iso-countries/langs/en.json'))
 
@@ -66,14 +94,7 @@ function generalCompare(
 }
 
 export type * from '@zkpassport/utils'
-export {
-  EU_COUNTRIES,
-  EEA_COUNTRIES,
-  SCHENGEN_COUNTRIES,
-  ASEAN_COUNTRIES,
-  MERCOSUR_COUNTRIES,
-  SANCTIONED_COUNTRIES,
-} from '@zkpassport/utils'
+export * from '@zkpassport/utils'
 
 export class ZKPassport {
   private domain: string
@@ -122,12 +143,22 @@ export class ZKPassport {
       await Promise.all(this.onRejectCallbacks[topic].map((callback) => callback()))
     } else if (request.method === 'proof') {
       logger.debug(`User generated proof`)
-      this.topicToProofs[topic].push(request.params)
+      // Uncompress the proof and convert it to a hex string
+      const bytesProof = Buffer.from(request.params.proof, 'base64')
+      const uncompressedProof = await ungzip(bytesProof)
+      // The gzip lib in the app compress the proof as ASCII
+      const hex = new TextDecoder().decode(uncompressedProof)
+      const processedProof = {
+        proof: hex,
+        vkeyHash: request.params.vkeyHash,
+      }
+      this.topicToProofs[topic].push(processedProof)
       await Promise.all(
-        this.onProofGeneratedCallbacks[topic].map((callback) => callback(request.params)),
+        this.onProofGeneratedCallbacks[topic].map((callback) => callback(processedProof)),
       )
     } else if (request.method === 'done') {
       logger.debug(`User sent the final result`)
+      await this.verify(topic, this.topicToProofs[topic])
       await Promise.all(
         this.onFinalResultCallbacks[topic].map((callback) => callback(request.params)),
       )
@@ -332,10 +363,22 @@ export class ZKPassport {
    * @param proofs The proofs to verify.
    * @returns True if the proofs are valid, false otherwise.
    */
-  public verify(requestId: string, proofs?: Array<ProofResult>) {
+  public async verify(requestId: string, proofs?: Array<ProofResult>) {
     let proofsToVerify = proofs
     if (!proofs) {
       proofsToVerify = this.topicToProofs[requestId]
+      if (!proofsToVerify) {
+        throw new Error('No proofs to verify')
+      }
+    }
+    ///const verifier = new BarretenbergVerifier()
+    for (const proof of proofsToVerify!) {
+      const proofData = {
+        proof: Buffer.from(getProof(proofToFields(proof.proof as string)).join(''), 'hex'),
+        publicInputs: getPublicInputs(proofToFields(proof.proof as string)),
+      }
+      console.log('proofData', proofData)
+      //const verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(circuit.vkey))
     }
     /*const backend = new UltraHonkBackend(proofOfAgeCircuit as CompiledCircuit)
     const proofData: ProofData = {
