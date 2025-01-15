@@ -1,15 +1,16 @@
 import { randomBytes } from 'crypto'
 import { Alpha3Code, getAlpha3Code, registerLocale } from 'i18n-iso-countries'
-import type {
-  DisclosableIDCredential,
-  IDCredential,
-  IDCredentialConfig,
-  IDCredentialValue,
-  NumericalIDCredential,
-  ProofResult,
-  QueryResult,
-  CountryName,
-  JsonRpcRequest,
+import {
+  type DisclosableIDCredential,
+  type IDCredential,
+  type IDCredentialConfig,
+  type IDCredentialValue,
+  type NumericalIDCredential,
+  type ProofResult,
+  type QueryResult,
+  type CountryName,
+  type JsonRpcRequest,
+  getProofData,
 } from '@zkpassport/utils'
 //import { BarretenbergVerifier, ProofData } from '@aztec/bb.js'
 import { bytesToHex, hexToBytes } from '@noble/ciphers/utils'
@@ -18,33 +19,6 @@ import { createEncryptedJsonRpcRequest } from './json-rpc'
 import { decrypt, generateECDHKeyPair, getSharedSecret } from './encryption'
 import logger from './logger'
 import { ungzip } from 'node-gzip'
-
-function proofToFields(proof: string) {
-  // Convert hex string to bytes
-  const bytes = Buffer.from(proof, 'hex')
-
-  // Start from index 4 and chunk into 32-byte segments
-  const fields: Buffer[] = []
-  for (let i = 4; i < bytes.length; i += 32) {
-    fields.push(bytes.subarray(i, i + 32))
-  }
-
-  return fields.map((field) => field.toString('hex'))
-}
-
-function getNumberOfPublicInputs(proofAsFields: string[]) {
-  return parseInt(proofAsFields[1], 16)
-}
-
-function getPublicInputs(proofAsFields: string[]) {
-  const publicInputsNumber = getNumberOfPublicInputs(proofAsFields)
-  return proofAsFields.slice(3, publicInputsNumber + 3)
-}
-
-function getProof(proofAsFields: string[]) {
-  const publicInputsNumber = getNumberOfPublicInputs(proofAsFields)
-  return [...proofAsFields.slice(0, 3), ...proofAsFields.slice(publicInputsNumber + 3)]
-}
 
 registerLocale(require('i18n-iso-countries/langs/en.json'))
 
@@ -147,9 +121,11 @@ export class ZKPassport {
       const bytesProof = Buffer.from(request.params.proof, 'base64')
       const uncompressedProof = await ungzip(bytesProof)
       // The gzip lib in the app compress the proof as ASCII
-      const hex = new TextDecoder().decode(uncompressedProof)
+      // and since the app passes the proof as a hex string, we can
+      // just decode the bytes as hex characters using the TextDecoder
+      const hexProof = new TextDecoder().decode(uncompressedProof)
       const processedProof = {
-        proof: hex,
+        proof: hexProof,
         vkeyHash: request.params.vkeyHash,
       }
       this.topicToProofs[topic].push(processedProof)
@@ -371,12 +347,10 @@ export class ZKPassport {
         throw new Error('No proofs to verify')
       }
     }
-    ///const verifier = new BarretenbergVerifier()
+    //const verifier = new BarretenbergVerifier()
     for (const proof of proofsToVerify!) {
-      const proofData = {
-        proof: Buffer.from(getProof(proofToFields(proof.proof as string)).join(''), 'hex'),
-        publicInputs: getPublicInputs(proofToFields(proof.proof as string)),
-      }
+      const proofData = getProofData(proof.proof as string)
+      console.log('vkeyHash', proof.vkeyHash)
       console.log('proofData', proofData)
       //const verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(circuit.vkey))
     }
