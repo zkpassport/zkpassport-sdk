@@ -68,7 +68,14 @@ function generalCompare(
 }
 
 export type * from '@zkpassport/utils'
-export * from '@zkpassport/utils'
+export {
+  SANCTIONED_COUNTRIES,
+  EU_COUNTRIES,
+  EEA_COUNTRIES,
+  SCHENGEN_COUNTRIES,
+  ASEAN_COUNTRIES,
+  MERCOSUR_COUNTRIES,
+} from '@zkpassport/utils'
 
 export class ZKPassport {
   private domain: string
@@ -337,9 +344,10 @@ export class ZKPassport {
    * @notice Verify the proofs received from the mobile app.
    * @param requestId The request ID.
    * @param proofs The proofs to verify.
+   * @param queryResult The query result to verify against
    * @returns True if the proofs are valid, false otherwise.
    */
-  public async verify(requestId: string, proofs?: Array<ProofResult>) {
+  public async verify(requestId: string, proofs?: Array<ProofResult>, queryResult?: QueryResult) {
     let proofsToVerify = proofs
     if (!proofs) {
       proofsToVerify = this.topicToProofs[requestId]
@@ -354,13 +362,6 @@ export class ZKPassport {
       console.log('proofData', proofData)
       //const verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(circuit.vkey))
     }
-    /*const backend = new UltraHonkBackend(proofOfAgeCircuit as CompiledCircuit)
-    const proofData: ProofData = {
-      proof: Buffer.from(result.proof as string, 'hex'),
-      // TODO: extract the public inputs from the proof
-      publicInputs: [],
-    }
-    return backend.verifyProof(proofData)*/
     delete this.topicToProofs[requestId]
   }
 
