@@ -11,13 +11,14 @@ import {
   type CountryName,
   type JsonRpcRequest,
   getProofData,
+  getHostedPackagedCircuitByVkeyHash,
 } from '@zkpassport/utils'
-//import { BarretenbergVerifier, ProofData } from '@aztec/bb.js'
-import { bytesToHex, hexToBytes } from '@noble/ciphers/utils'
+import { bytesToHex } from '@noble/ciphers/utils'
 import { getWebSocketClient, WebSocketClient } from './websocket'
 import { createEncryptedJsonRpcRequest } from './json-rpc'
 import { decrypt, generateECDHKeyPair, getSharedSecret } from './encryption'
 import logger from './logger'
+import { BarretenbergVerifier } from '@aztec/bb.js'
 import { ungzip } from 'node-gzip'
 
 registerLocale(require('i18n-iso-countries/langs/en.json'))
@@ -94,7 +95,10 @@ export class ZKPassport {
   private onGeneratingProofCallbacks: Record<string, Array<(topic: string) => void>> = {}
   private onBridgeConnectCallbacks: Record<string, Array<() => void>> = {}
   private onProofGeneratedCallbacks: Record<string, Array<(proof: ProofResult) => void>> = {}
-  private onFinalResultCallbacks: Record<string, Array<(result: QueryResult) => void>> = {}
+  private onResultCallbacks: Record<
+    string,
+    Array<(response: { uniqueIdentifier: string; verified: boolean; result: QueryResult }) => void>
+  > = {}
   private onRejectCallbacks: Record<string, Array<() => void>> = {}
   private onErrorCallbacks: Record<string, Array<(topic: string) => void>> = {}
 
@@ -140,10 +144,21 @@ export class ZKPassport {
         this.onProofGeneratedCallbacks[topic].map((callback) => callback(processedProof)),
       )
     } else if (request.method === 'done') {
-      logger.debug(`User sent the final result`)
-      await this.verify(topic, this.topicToProofs[topic])
+      logger.debug(`User sent the query result`)
+      // Verify the proofs and extract the unique identifier (aka nullifier) and the verification result
+      const { uniqueIdentifier, verified } = await this.verify(
+        topic,
+        this.topicToProofs[topic],
+        request.params,
+      )
       await Promise.all(
-        this.onFinalResultCallbacks[topic].map((callback) => callback(request.params)),
+        this.onResultCallbacks[topic].map((callback) =>
+          callback({
+            uniqueIdentifier,
+            verified,
+            result: request.params,
+          }),
+        ),
       )
     } else if (request.method === 'error') {
       await Promise.all(
@@ -224,8 +239,13 @@ export class ZKPassport {
             this.onBridgeConnectCallbacks[topic].push(callback),
           onProofGenerated: (callback: (proof: ProofResult) => void) =>
             this.onProofGeneratedCallbacks[topic].push(callback),
-          onFinalResult: (callback: (result: QueryResult) => void) =>
-            this.onFinalResultCallbacks[topic].push(callback),
+          onResult: (
+            callback: (response: {
+              uniqueIdentifier: string
+              verified: boolean
+              result: QueryResult
+            }) => void,
+          ) => this.onResultCallbacks[topic].push(callback),
           onReject: (callback: () => void) => this.onRejectCallbacks[topic].push(callback),
           onError: (callback: (error: string) => void) =>
             this.onErrorCallbacks[topic].push(callback),
@@ -271,7 +291,7 @@ export class ZKPassport {
     this.onGeneratingProofCallbacks[topic] = []
     this.onBridgeConnectCallbacks[topic] = []
     this.onProofGeneratedCallbacks[topic] = []
-    this.onFinalResultCallbacks[topic] = []
+    this.onResultCallbacks[topic] = []
     this.onRejectCallbacks[topic] = []
     this.onErrorCallbacks[topic] = []
 
@@ -347,7 +367,11 @@ export class ZKPassport {
    * @param queryResult The query result to verify against
    * @returns True if the proofs are valid, false otherwise.
    */
-  public async verify(requestId: string, proofs?: Array<ProofResult>, queryResult?: QueryResult) {
+  public async verify(
+    requestId: string,
+    proofs?: Array<ProofResult>,
+    queryResult?: QueryResult,
+  ): Promise<{ uniqueIdentifier: string; verified: boolean }> {
     let proofsToVerify = proofs
     if (!proofs) {
       proofsToVerify = this.topicToProofs[requestId]
@@ -355,14 +379,29 @@ export class ZKPassport {
         throw new Error('No proofs to verify')
       }
     }
-    //const verifier = new BarretenbergVerifier()
+    const verifier = new BarretenbergVerifier()
+    let verified = false
     for (const proof of proofsToVerify!) {
       const proofData = getProofData(proof.proof as string)
-      console.log('vkeyHash', proof.vkeyHash)
+      const hostedPackagedCircuit = await getHostedPackagedCircuitByVkeyHash(
+        proof.vkeyHash as string,
+      )
+      const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, 'base64')
       console.log('proofData', proofData)
-      //const verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(circuit.vkey))
+      verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(vkeyBytes))
+      console.log('verified', verified)
+      if (!verified) {
+        // Break the loop if the proof is not valid
+        // and don't bother checking the other proofs
+        break
+      }
+      // TODO: verify the proof public inputs against the query result
+      // Use the name field in the retrieved packaged circuit to get which type of circuit it is
+      // and thus what the public inputs to retrieve from the proof data
+      // And extract the nullifier and provide it as return value to the verify function
     }
     delete this.topicToProofs[requestId]
+    return { uniqueIdentifier: '', verified }
   }
 
   /**

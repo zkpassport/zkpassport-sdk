@@ -20,9 +20,9 @@ const queryBuilder = await zkPassport.request({
   name: 'ZKPassport',
   logo: 'https://zkpassport.id/logo.png',
   purpose: 'Prove you are an adult from the EU but not from Scandinavia',
-  // The scope is optional and can be used to scope the nullifier
-  // of the proof to a specific use case
-  // By default, the nullifier is scoped to your domain name only
+  // The scope is optional and can be used to scope the unique identifier
+  // of the request to a specific use case
+  // By default, the request's unique identifier is scoped to your domain name only
   scope: 'eu-adult-not-scandinavia',
 })
 
@@ -37,7 +37,7 @@ const {
   onQRCodeScanned,
   onGeneratingProof,
   onProofGenerated,
-  onFinalResult,
+  onResult,
   onReject,
   onError,
 } = queryBuilder
@@ -64,24 +64,42 @@ onGeneratingProof(() => {
 
 onProofGenerated(({ proof, vkeyHash }: ProofResult) => {
   // One of the proofs has been generated
-  // You can retrieve the proof and the verification key hash (to be mapped to the actual vkey)
-  // Note: the verify function will soon be added to the SDK so you can verify the proof
-  // directly
+  // Here, you can retrieve the proof manually and verify it
+  // But note that the verification of the proofs is handled
+  // automatically by the SDK
   console.log('Proof generated', proof)
   console.log('Verification key hash', vkeyHash)
 })
 
-onFinalResult((result: QueryResult) => {
-  // All the proofs have been generated and the final result is available
-  console.log('firstname', result.firstname.disclose.result)
-  console.log('age over 18', result.age.gte.result)
-  console.log('nationality in EU', result.nationality.in.result)
-  console.log('nationality not from Scandinavia', result.nationality.out.result)
-  // You can also retrieved what were the values originally requested
-  console.log('age over', result.age.gte.expected)
-  console.log('nationality in', result.nationality.in.expected)
-  console.log('nationality not in', result.nationality.out.expected)
-})
+onResult(
+  ({
+    uniqueIdentifier,
+    verified,
+    result,
+  }: {
+    uniqueIdentifier: string
+    verified: boolean
+    result: QueryResult
+  }) => {
+    // All the proofs have been generated and the final result is available
+    console.log('firstname', result.firstname.disclose.result)
+    console.log('age over 18', result.age.gte.result)
+    console.log('nationality in EU', result.nationality.in.result)
+    console.log('nationality not from Scandinavia', result.nationality.out.result)
+    // You can also retrieved what were the values originally requested
+    console.log('age over', result.age.gte.expected)
+    console.log('nationality in', result.nationality.in.expected)
+    console.log('nationality not in', result.nationality.out.expected)
+    // You can make sure the proof are valid by checking verified is set to true
+    console.log('proofs are valid', verified)
+    // You can also retrieve the unique identifier associated to this request
+    // The assumption is that the unique identifier will be the same if coming
+    // from the same ID for the same domain name and scope
+    // So you can use it to identify if the user has already provided the proof
+    // for this specific use case
+    console.log('unique identifier', uniqueIdentifier)
+  },
+)
 ```
 
 ### Using with Next.js
