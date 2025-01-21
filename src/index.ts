@@ -11,7 +11,7 @@ import {
   type CountryName,
   type JsonRpcRequest,
   getProofData,
-  getHostedPackagedCircuitByVkeyHash,
+  getHostedPackagedCircuitByName,
 } from '@zkpassport/utils'
 import { bytesToHex } from '@noble/ciphers/utils'
 import { getWebSocketClient, WebSocketClient } from './websocket'
@@ -78,6 +78,42 @@ export {
   MERCOSUR_COUNTRIES,
 } from '@zkpassport/utils'
 
+export type QueryBuilderResult = {
+  url: string
+  requestId: string
+  onQRCodeScanned: (callback: () => void) => void
+  onGeneratingProof: (callback: () => void) => void
+  onBridgeConnect: (callback: () => void) => void
+  onProofGenerated: (callback: (proof: ProofResult) => void) => void
+  onResult: (
+    callback: (response: {
+      uniqueIdentifier: string
+      verified: boolean
+      result: QueryResult
+    }) => void,
+  ) => void
+  onReject: (callback: () => void) => void
+  onError: (callback: (error: string) => void) => void
+  isBridgeConnected: () => boolean
+  isQRCodeScanned: () => boolean
+}
+
+export type QueryBuilder = {
+  eq: <T extends IDCredential>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  gte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  lte: <T extends 'birthdate' | 'expiry_date'>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  lt: <T extends 'age'>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  range: <T extends NumericalIDCredential>(
+    key: T,
+    start: IDCredentialValue<T>,
+    end: IDCredentialValue<T>,
+  ) => QueryBuilder
+  in: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => QueryBuilder
+  out: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => QueryBuilder
+  disclose: (key: DisclosableIDCredential) => QueryBuilder
+  done: () => QueryBuilderResult
+}
+
 export class ZKPassport {
   private domain: string
   private topicToConfig: Record<string, Record<string, IDCredentialConfig>> = {}
@@ -135,9 +171,11 @@ export class ZKPassport {
       // and since the app passes the proof as a hex string, we can
       // just decode the bytes as hex characters using the TextDecoder
       const hexProof = new TextDecoder().decode(uncompressedProof)
-      const processedProof = {
+      const processedProof: ProofResult = {
         proof: hexProof,
         vkeyHash: request.params.vkeyHash,
+        name: request.params.name,
+        version: request.params.version,
       }
       this.topicToProofs[topic].push(processedProof)
       await Promise.all(
@@ -167,7 +205,7 @@ export class ZKPassport {
     }
   }
 
-  private getZkPassportRequest(topic: string) {
+  private getZkPassportRequest(topic: string): QueryBuilder {
     return {
       eq: <T extends IDCredential>(key: T, value: IDCredentialValue<T>) => {
         if (key === 'issuing_country' || key === 'nationality') {
@@ -383,8 +421,10 @@ export class ZKPassport {
     let verified = false
     for (const proof of proofsToVerify!) {
       const proofData = getProofData(proof.proof as string)
-      const hostedPackagedCircuit = await getHostedPackagedCircuitByVkeyHash(
-        proof.vkeyHash as string,
+      console.log('proofData', proofData)
+      const hostedPackagedCircuit = await getHostedPackagedCircuitByName(
+        proof.version as any,
+        proof.name!,
       )
       const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, 'base64')
       console.log('proofData', proofData)
