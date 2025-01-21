@@ -12,6 +12,22 @@ import {
   type JsonRpcRequest,
   getProofData,
   getHostedPackagedCircuitByName,
+  getCommitmentFromDSCProof,
+  getCommitmentInFromIDDataProof,
+  getCommitmentOutFromIDDataProof,
+  getNullifierFromDisclosureProof,
+  getCommitmentInFromIntegrityProof,
+  getCommitmentOutFromIntegrityProof,
+  getCommitmentInFromDisclosureProof,
+  getMerkleRootFromDSCProof,
+  getCurrentDateFromIntegrityProof,
+  getMaxAgeFromProof,
+  getMinAgeFromProof,
+  getCurrentDateFromAgeProof,
+  getMinDateFromProof,
+  getMaxDateFromProof,
+  getCountryListFromExclusionProof,
+  getCountryListFromInclusionProof,
 } from '@zkpassport/utils'
 import { bytesToHex } from '@noble/ciphers/utils'
 import { getWebSocketClient, WebSocketClient } from './websocket'
@@ -87,7 +103,7 @@ export type QueryBuilderResult = {
   onProofGenerated: (callback: (proof: ProofResult) => void) => void
   onResult: (
     callback: (response: {
-      uniqueIdentifier: string
+      uniqueIdentifier: string | undefined
       verified: boolean
       result: QueryResult
     }) => void,
@@ -133,7 +149,13 @@ export class ZKPassport {
   private onProofGeneratedCallbacks: Record<string, Array<(proof: ProofResult) => void>> = {}
   private onResultCallbacks: Record<
     string,
-    Array<(response: { uniqueIdentifier: string; verified: boolean; result: QueryResult }) => void>
+    Array<
+      (response: {
+        uniqueIdentifier: string | undefined
+        verified: boolean
+        result: QueryResult
+      }) => void
+    >
   > = {}
   private onRejectCallbacks: Record<string, Array<() => void>> = {}
   private onErrorCallbacks: Record<string, Array<(topic: string) => void>> = {}
@@ -279,7 +301,7 @@ export class ZKPassport {
             this.onProofGeneratedCallbacks[topic].push(callback),
           onResult: (
             callback: (response: {
-              uniqueIdentifier: string
+              uniqueIdentifier: string | undefined
               verified: boolean
               result: QueryResult
             }) => void,
@@ -398,6 +420,285 @@ export class ZKPassport {
     return this.getZkPassportRequest(topic)
   }
 
+  private async checkPublicInputs(proofs: Array<ProofResult>, queryResult: QueryResult) {
+    let commitmentIn: bigint | undefined
+    let commitmentOut: bigint | undefined
+    let isCorrect = true
+    let uniqueIdentifier: string | undefined
+    const expectedMerkleRoot = BigInt(0)
+    const defaultDateValue = new Date(1111, 10, 11)
+    for (const proof of proofs!) {
+      const proofData = getProofData(proof.proof as string)
+      if (proof.name?.startsWith('sig_check_dsc')) {
+        commitmentOut = getCommitmentFromDSCProof(proofData)
+        const merkleRoot = getMerkleRootFromDSCProof(proofData)
+        console.log('merkleRoot', merkleRoot)
+        /*if (merkleRoot !== expectedMerkleRoot) {
+          isCorrect = false
+          break
+        }*/
+      } else if (proof.name?.startsWith('sig_check_id_data')) {
+        commitmentIn = getCommitmentInFromIDDataProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            'Failed to check the link between root certificate signature and ID signature',
+          )
+          isCorrect = false
+          break
+        }
+        commitmentOut = getCommitmentOutFromIDDataProof(proofData)
+      } else if (proof.name?.startsWith('data_check_integrity')) {
+        commitmentIn = getCommitmentInFromIntegrityProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn('Failed to check the link between the ID signature and the data signed')
+          isCorrect = false
+          break
+        }
+        commitmentOut = getCommitmentOutFromIntegrityProof(proofData)
+        const currentDate = getCurrentDateFromIntegrityProof(proofData)
+        // The date should be today or yesterday
+        // (if the proof request was request just before midnight and is finalized after)
+        if (
+          currentDate.getTime() !== Date.now() &&
+          currentDate.getTime() !== Date.now() - 86400000
+        ) {
+          console.warn('Current date used to check the validity of the ID is too old')
+          isCorrect = false
+          break
+        }
+      } else if (proof.name === 'disclose_bytes') {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            'Failed to check the link between the validity of the ID and the data to disclose',
+          )
+          isCorrect = false
+          break
+        }
+        // TODO: check disclose bytes
+        uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
+      } else if (proof.name === 'compare_age') {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            'Failed to check the link between the validity of the ID and the age derived from it',
+          )
+          isCorrect = false
+          break
+        }
+        const minAge = getMinAgeFromProof(proofData)
+        const maxAge = getMaxAgeFromProof(proofData)
+        if (queryResult.age) {
+          if (queryResult.age.gte && (queryResult.age.gte.expected as number) >= minAge) {
+            console.warn('Age is not greater than or equal to the expected age')
+            isCorrect = false
+            break
+          }
+          if (queryResult.age.lt && (queryResult.age.lt.expected as number) < maxAge) {
+            console.warn('Age is not less than the expected age')
+            isCorrect = false
+            break
+          }
+          if (queryResult.age.range) {
+            if (
+              (queryResult.age.range.expected[0] as number) < minAge ||
+              (queryResult.age.range.expected[1] as number) >= maxAge
+            ) {
+              console.warn('Age is not in the expected range')
+              isCorrect = false
+              break
+            }
+          }
+          if (!queryResult.age.lt && !queryResult.age.range && maxAge != 0) {
+            console.warn('Maximum age should be equal to 0')
+            isCorrect = false
+            break
+          }
+          if (!queryResult.age.gte && !queryResult.age.range && minAge != 0) {
+            console.warn('Minimum age should be equal to 0')
+            isCorrect = false
+            break
+          }
+        } else {
+          console.warn('Age is not set in the query result')
+          isCorrect = false
+          break
+        }
+        const currentDate = getCurrentDateFromAgeProof(proofData)
+        if (
+          currentDate.getTime() !== Date.now() &&
+          currentDate.getTime() !== Date.now() - 86400000
+        ) {
+          console.warn('Current date in the proof is too old')
+          isCorrect = false
+          break
+        }
+        uniqueIdentifier = getCommitmentInFromDisclosureProof(proofData).toString(10)
+      } else if (proof.name === 'compare_birthdate') {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            'Failed to check the link between the validity of the ID and the birthdate derived from it',
+          )
+          isCorrect = false
+          break
+        }
+        const minDate = getMinDateFromProof(proofData)
+        const maxDate = getMaxDateFromProof(proofData)
+        if (queryResult.birthdate) {
+          if (queryResult.birthdate.gte && queryResult.birthdate.gte.expected >= minDate) {
+            console.warn('Birthdate is not greater than or equal to the expected birthdate')
+            isCorrect = false
+            break
+          }
+          if (queryResult.birthdate.lte && queryResult.birthdate.lte.expected < maxDate) {
+            console.warn('Birthdate is not less than the expected birthdate')
+            isCorrect = false
+            break
+          }
+          if (queryResult.birthdate.range) {
+            if (
+              queryResult.birthdate.range.expected[0] < minDate ||
+              queryResult.birthdate.range.expected[1] >= maxDate
+            ) {
+              console.warn('Birthdate is not in the expected range')
+              isCorrect = false
+              break
+            }
+          }
+          if (
+            !queryResult.birthdate.lte &&
+            !queryResult.birthdate.range &&
+            maxDate != defaultDateValue
+          ) {
+            console.warn('Maximum birthdate should be equal to default date value')
+            isCorrect = false
+            break
+          }
+          if (
+            !queryResult.birthdate.gte &&
+            !queryResult.birthdate.range &&
+            minDate != defaultDateValue
+          ) {
+            console.warn('Minimum birthdate should be equal to default date value')
+            isCorrect = false
+            break
+          }
+        } else {
+          console.warn('Birthdate is not set in the query result')
+          isCorrect = false
+          break
+        }
+        uniqueIdentifier = getCommitmentInFromDisclosureProof(proofData).toString(10)
+      } else if (proof.name === 'compare_expiry') {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            'Failed to check the link between the validity of the ID and its expiry date',
+          )
+          isCorrect = false
+          break
+        }
+        const minDate = getMinDateFromProof(proofData)
+        const maxDate = getMaxDateFromProof(proofData)
+        if (queryResult.expiry_date) {
+          if (queryResult.expiry_date.gte && queryResult.expiry_date.gte.expected >= minDate) {
+            console.warn('Expiry date is not greater than or equal to the expected expiry date')
+            isCorrect = false
+            break
+          }
+          if (queryResult.expiry_date.lte && queryResult.expiry_date.lte.expected < maxDate) {
+            console.warn('Expiry date is not less than the expected expiry date')
+            isCorrect = false
+            break
+          }
+          if (queryResult.expiry_date.range) {
+            if (
+              queryResult.expiry_date.range.expected[0] < minDate ||
+              queryResult.expiry_date.range.expected[1] >= maxDate
+            ) {
+              console.warn('Expiry date is not in the expected range')
+              isCorrect = false
+              break
+            }
+          }
+          if (
+            !queryResult.expiry_date.lte &&
+            !queryResult.expiry_date.range &&
+            maxDate != defaultDateValue
+          ) {
+            console.warn('Maximum expiry date should be equal to default date value')
+            isCorrect = false
+            break
+          }
+          if (
+            !queryResult.expiry_date.gte &&
+            !queryResult.expiry_date.range &&
+            minDate != defaultDateValue
+          ) {
+            console.warn('Minimum expiry date should be equal to default date value')
+            isCorrect = false
+            break
+          }
+        } else {
+          console.warn('Expiry date is not set in the query result')
+          isCorrect = false
+          break
+        }
+        uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
+      } else if (proof.name === 'exclusion_check_country') {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            'Failed to check the link between the validity of the ID and the country exclusion check',
+          )
+          isCorrect = false
+          break
+        }
+        const countryList = getCountryListFromExclusionProof(proofData)
+        if (queryResult.nationality && queryResult.nationality.out) {
+          if (
+            !queryResult.nationality.out.expected?.every((country) => countryList.includes(country))
+          ) {
+            console.warn('Country exclusion list does not match the one from the query results')
+            isCorrect = false
+            break
+          }
+        } else {
+          console.warn('Nationality exclusion is not set in the query result')
+          isCorrect = false
+          break
+        }
+        uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
+      } else if (proof.name === 'inclusion_check_country') {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            'Failed to check the link between the validity of the ID and the country inclusion check',
+          )
+          isCorrect = false
+          break
+        }
+        const countryList = getCountryListFromInclusionProof(proofData)
+        if (queryResult.nationality && queryResult.nationality.in) {
+          if (
+            !queryResult.nationality.in.expected?.every((country) => countryList.includes(country))
+          ) {
+            console.warn('Country inclusion list does not match the one from the query results')
+            isCorrect = false
+            break
+          }
+        } else {
+          console.warn('Nationality inclusion is not set in the query result')
+          isCorrect = false
+          break
+        }
+        uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
+      }
+    }
+    return { isCorrect, uniqueIdentifier }
+  }
+
   /**
    * @notice Verify the proofs received from the mobile app.
    * @param requestId The request ID.
@@ -409,7 +710,7 @@ export class ZKPassport {
     requestId: string,
     proofs?: Array<ProofResult>,
     queryResult?: QueryResult,
-  ): Promise<{ uniqueIdentifier: string; verified: boolean }> {
+  ): Promise<{ uniqueIdentifier: string | undefined; verified: boolean }> {
     let proofsToVerify = proofs
     if (!proofs) {
       proofsToVerify = this.topicToProofs[requestId]
@@ -418,7 +719,14 @@ export class ZKPassport {
       }
     }
     const verifier = new BarretenbergVerifier()
-    let verified = false
+    let verified = true
+    let uniqueIdentifier: string | undefined
+    if (queryResult) {
+      const { isCorrect, uniqueIdentifier: uniqueIdentifierFromPublicInputs } =
+        await this.checkPublicInputs(proofsToVerify!, queryResult!)
+      uniqueIdentifier = uniqueIdentifierFromPublicInputs
+      verified = isCorrect
+    }
     for (const proof of proofsToVerify!) {
       const proofData = getProofData(proof.proof as string)
       console.log('proofData', proofData)
@@ -435,13 +743,9 @@ export class ZKPassport {
         // and don't bother checking the other proofs
         break
       }
-      // TODO: verify the proof public inputs against the query result
-      // Use the name field in the retrieved packaged circuit to get which type of circuit it is
-      // and thus what the public inputs to retrieve from the proof data
-      // And extract the nullifier and provide it as return value to the verify function
     }
     delete this.topicToProofs[requestId]
-    return { uniqueIdentifier: '', verified }
+    return { uniqueIdentifier, verified }
   }
 
   /**
