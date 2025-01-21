@@ -427,7 +427,29 @@ export class ZKPassport {
     let uniqueIdentifier: string | undefined
     const expectedMerkleRoot = BigInt(0)
     const defaultDateValue = new Date(1111, 10, 11)
-    for (const proof of proofs!) {
+
+    // Since the order is important for the commitments, we need to sort the proofs
+    // by their expected order: root signature check -> ID signature check -> integrity check -> disclosure
+    const sortedProofs = proofs.sort((a, b) => {
+      const proofOrder = [
+        'sig_check_dsc',
+        'sig_check_id_data',
+        'data_check_integrity',
+        'disclose_bytes',
+        'compare_age',
+        'compare_birthdate',
+        'compare_expiry',
+        'exclusion_check_country',
+        'inclusion_check_country',
+      ]
+      const getIndex = (proof: ProofResult) => {
+        const name = proof.name || ''
+        return proofOrder.findIndex((p) => name.startsWith(p))
+      }
+      return getIndex(a) - getIndex(b)
+    })
+
+    for (const proof of sortedProofs!) {
       const proofData = getProofData(proof.proof as string)
       if (proof.name?.startsWith('sig_check_dsc')) {
         commitmentOut = getCommitmentFromDSCProof(proofData)
