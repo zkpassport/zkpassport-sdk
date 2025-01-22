@@ -11,7 +11,6 @@ import {
   type CountryName,
   type JsonRpcRequest,
   getProofData,
-  getHostedPackagedCircuitByName,
   getCommitmentFromDSCProof,
   getCommitmentInFromIDDataProof,
   getCommitmentOutFromIDDataProof,
@@ -28,6 +27,8 @@ import {
   getMaxDateFromProof,
   getCountryListFromExclusionProof,
   getCountryListFromInclusionProof,
+  DisclosedData,
+  formatName,
 } from '@zkpassport/utils'
 import { bytesToHex } from '@noble/ciphers/utils'
 import { getWebSocketClient, WebSocketClient } from './websocket'
@@ -425,8 +426,20 @@ export class ZKPassport {
     let commitmentOut: bigint | undefined
     let isCorrect = true
     let uniqueIdentifier: string | undefined
-    const expectedMerkleRoot = BigInt(0)
+    const expectedMerkleRoot = BigInt(
+      '21301853597069384763054217328384418971999152625381818922211526730996340553696',
+    )
     const defaultDateValue = new Date(1111, 10, 11)
+    const currentTime = new Date()
+    const today = new Date(
+      currentTime.getFullYear(),
+      currentTime.getMonth(),
+      currentTime.getDate(),
+      0,
+      0,
+      0,
+      0,
+    )
 
     // Since the order is important for the commitments, we need to sort the proofs
     // by their expected order: root signature check -> ID signature check -> integrity check -> disclosure
@@ -449,21 +462,22 @@ export class ZKPassport {
       return getIndex(a) - getIndex(b)
     })
 
+    console.log('sortedProofs', sortedProofs)
     for (const proof of sortedProofs!) {
       const proofData = getProofData(proof.proof as string)
       if (proof.name?.startsWith('sig_check_dsc')) {
         commitmentOut = getCommitmentFromDSCProof(proofData)
         const merkleRoot = getMerkleRootFromDSCProof(proofData)
-        console.log('merkleRoot', merkleRoot)
-        /*if (merkleRoot !== expectedMerkleRoot) {
+        if (merkleRoot !== expectedMerkleRoot) {
+          console.warn('The ID was signed by an unrecognized root certificate')
           isCorrect = false
           break
-        }*/
+        }
       } else if (proof.name?.startsWith('sig_check_id_data')) {
         commitmentIn = getCommitmentInFromIDDataProof(proofData)
         if (commitmentIn !== commitmentOut) {
           console.warn(
-            'Failed to check the link between root certificate signature and ID signature',
+            'Failed to check the link between the certificate signature and ID signature',
           )
           isCorrect = false
           break
@@ -479,10 +493,10 @@ export class ZKPassport {
         commitmentOut = getCommitmentOutFromIntegrityProof(proofData)
         const currentDate = getCurrentDateFromIntegrityProof(proofData)
         // The date should be today or yesterday
-        // (if the proof request was request just before midnight and is finalized after)
+        // (if the proof request was requested just before midnight and is finalized after)
         if (
-          currentDate.getTime() !== Date.now() &&
-          currentDate.getTime() !== Date.now() - 86400000
+          currentDate.getTime() !== today.getTime() &&
+          currentDate.getTime() !== today.getTime() - 86400000
         ) {
           console.warn('Current date used to check the validity of the ID is too old')
           isCorrect = false
@@ -497,7 +511,264 @@ export class ZKPassport {
           isCorrect = false
           break
         }
-        // TODO: check disclose bytes
+        // We can't be certain that the disclosed data is for a passport or an ID card
+        // so we need to check both (unless the document type is revealed)
+        const disclosedDataPassport = DisclosedData.fromBytesProof(proofData, 'passport')
+        const disclosedDataIDCard = DisclosedData.fromBytesProof(proofData, 'id_card')
+        if (queryResult.document_type) {
+          // Document type is always at the same index in the disclosed data
+          if (
+            queryResult.document_type.eq &&
+            queryResult.document_type.eq.result &&
+            queryResult.document_type.eq.expected !== disclosedDataPassport.documentType
+          ) {
+            console.warn('Document type does not match the expected document type')
+            isCorrect = false
+            break
+          }
+          if (queryResult.document_type.disclose?.result !== disclosedDataIDCard.documentType) {
+            console.warn('Document type does not match the disclosed document type in query result')
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.birthdate) {
+          const birthdatePassport = disclosedDataPassport.dateOfBirth
+          const birthdateIDCard = disclosedDataIDCard.dateOfBirth
+          if (
+            queryResult.birthdate.eq &&
+            queryResult.birthdate.eq.result &&
+            queryResult.birthdate.eq.expected.getTime() !== birthdatePassport.getTime() &&
+            queryResult.birthdate.eq.expected.getTime() !== birthdateIDCard.getTime()
+          ) {
+            console.warn('Birthdate does not match the expected birthdate')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.birthdate.disclose &&
+            queryResult.birthdate.disclose.result.getTime() !== birthdatePassport.getTime() &&
+            queryResult.birthdate.disclose.result.getTime() !== birthdateIDCard.getTime()
+          ) {
+            console.warn('Birthdate does not match the disclosed birthdate in query result')
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.expiry_date) {
+          const expiryDatePassport = disclosedDataPassport.dateOfExpiry
+          const expiryDateIDCard = disclosedDataIDCard.dateOfExpiry
+          if (
+            queryResult.expiry_date.eq &&
+            queryResult.expiry_date.eq.result &&
+            queryResult.expiry_date.eq.expected.getTime() !== expiryDatePassport.getTime() &&
+            queryResult.expiry_date.eq.expected.getTime() !== expiryDateIDCard.getTime()
+          ) {
+            console.warn('Expiry date does not match the expected expiry date')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.expiry_date.disclose &&
+            queryResult.expiry_date.disclose.result.getTime() !== expiryDatePassport.getTime() &&
+            queryResult.expiry_date.disclose.result.getTime() !== expiryDateIDCard.getTime()
+          ) {
+            console.warn('Expiry date does not match the disclosed expiry date in query result')
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.nationality) {
+          const nationalityPassport = disclosedDataPassport.nationality
+          const nationalityIDCard = disclosedDataIDCard.nationality
+          if (
+            queryResult.nationality.eq &&
+            queryResult.nationality.eq.result &&
+            queryResult.nationality.eq.expected !== nationalityPassport &&
+            queryResult.nationality.eq.expected !== nationalityIDCard
+          ) {
+            console.warn('Nationality does not match the expected nationality')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.nationality.disclose &&
+            queryResult.nationality.disclose.result !== nationalityPassport &&
+            queryResult.nationality.disclose.result !== nationalityIDCard
+          ) {
+            console.warn('Nationality does not match the disclosed nationality in query result')
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.document_number) {
+          const documentNumberPassport = disclosedDataPassport.documentNumber
+          const documentNumberIDCard = disclosedDataIDCard.documentNumber
+          if (
+            queryResult.document_number.eq &&
+            queryResult.document_number.eq.result &&
+            queryResult.document_number.eq.expected !== documentNumberPassport &&
+            queryResult.document_number.eq.expected !== documentNumberIDCard
+          ) {
+            console.warn('Document number does not match the expected document number')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.document_number.disclose &&
+            queryResult.document_number.disclose.result !== documentNumberPassport &&
+            queryResult.document_number.disclose.result !== documentNumberIDCard
+          ) {
+            console.warn(
+              'Document number does not match the disclosed document number in query result',
+            )
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.gender) {
+          const genderPassport = disclosedDataPassport.gender
+          const genderIDCard = disclosedDataIDCard.gender
+          if (
+            queryResult.gender.eq &&
+            queryResult.gender.eq.result &&
+            queryResult.gender.eq.expected !== genderPassport &&
+            queryResult.gender.eq.expected !== genderIDCard
+          ) {
+            console.warn('Gender does not match the expected gender')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.gender.disclose &&
+            queryResult.gender.disclose.result !== genderPassport &&
+            queryResult.gender.disclose.result !== genderIDCard
+          ) {
+            console.warn('Gender does not match the disclosed gender in query result')
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.issuing_country) {
+          const issuingCountryPassport = disclosedDataPassport.issuingCountry
+          const issuingCountryIDCard = disclosedDataIDCard.issuingCountry
+          if (
+            queryResult.issuing_country.eq &&
+            queryResult.issuing_country.eq.result &&
+            queryResult.issuing_country.eq.expected !== issuingCountryPassport &&
+            queryResult.issuing_country.eq.expected !== issuingCountryIDCard
+          ) {
+            console.warn('Issuing country does not match the expected issuing country')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.issuing_country.disclose &&
+            queryResult.issuing_country.disclose.result !== issuingCountryPassport &&
+            queryResult.issuing_country.disclose.result !== issuingCountryIDCard
+          ) {
+            console.warn(
+              'Issuing country does not match the disclosed issuing country in query result',
+            )
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.fullname) {
+          const fullnamePassport = disclosedDataPassport.name
+          const fullnameIDCard = disclosedDataIDCard.name
+          if (
+            queryResult.fullname.eq &&
+            queryResult.fullname.eq.result &&
+            formatName(queryResult.fullname.eq.expected).toLowerCase() !==
+              fullnamePassport.toLowerCase() &&
+            formatName(queryResult.fullname.eq.expected).toLowerCase() !==
+              fullnameIDCard.toLowerCase()
+          ) {
+            console.warn('Fullname does not match the expected fullname')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.fullname.disclose &&
+            formatName(queryResult.fullname.disclose.result).toLowerCase() !==
+              fullnamePassport.toLowerCase() &&
+            formatName(queryResult.fullname.disclose.result).toLowerCase() !==
+              fullnameIDCard.toLowerCase()
+          ) {
+            console.warn('Fullname does not match the disclosed fullname in query result')
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.firstname) {
+          // If fullname was not revealed, then the name could be either the first name or last name
+          const firstnamePassport =
+            disclosedDataPassport.firstName && disclosedDataPassport.firstName.length > 0
+              ? disclosedDataPassport.firstName
+              : disclosedDataPassport.name
+          const firstnameIDCard =
+            disclosedDataIDCard.firstName && disclosedDataIDCard.firstName.length > 0
+              ? disclosedDataIDCard.firstName
+              : disclosedDataIDCard.name
+          if (
+            queryResult.firstname.eq &&
+            queryResult.firstname.eq.result &&
+            formatName(queryResult.firstname.eq.expected).toLowerCase() !==
+              firstnamePassport.toLowerCase() &&
+            formatName(queryResult.firstname.eq.expected).toLowerCase() !==
+              firstnameIDCard.toLowerCase()
+          ) {
+            console.warn('Firstname does not match the expected firstname')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.firstname.disclose &&
+            formatName(queryResult.firstname.disclose.result).toLowerCase() !==
+              firstnamePassport.toLowerCase() &&
+            formatName(queryResult.firstname.disclose.result).toLowerCase() !==
+              firstnameIDCard.toLowerCase()
+          ) {
+            console.warn('Firstname does not match the disclosed firstname in query result')
+            isCorrect = false
+            break
+          }
+        }
+        if (queryResult.lastname) {
+          // If fullname was not revealed, then the name could be either the first name or last name
+          const lastnamePassport =
+            disclosedDataPassport.lastName && disclosedDataPassport.lastName.length > 0
+              ? disclosedDataPassport.lastName
+              : disclosedDataPassport.name
+          const lastnameIDCard =
+            disclosedDataIDCard.lastName && disclosedDataIDCard.lastName.length > 0
+              ? disclosedDataIDCard.lastName
+              : disclosedDataIDCard.name
+          if (
+            queryResult.lastname.eq &&
+            queryResult.lastname.eq.result &&
+            formatName(queryResult.lastname.eq.expected).toLowerCase() !==
+              lastnamePassport.toLowerCase() &&
+            formatName(queryResult.lastname.eq.expected).toLowerCase() !==
+              lastnameIDCard.toLowerCase()
+          ) {
+            console.warn('Lastname does not match the expected lastname')
+            isCorrect = false
+            break
+          }
+          if (
+            queryResult.lastname.disclose &&
+            formatName(queryResult.lastname.disclose.result).toLowerCase() !==
+              lastnamePassport.toLowerCase() &&
+            formatName(queryResult.lastname.disclose.result).toLowerCase() !==
+              lastnameIDCard.toLowerCase()
+          ) {
+            console.warn('Lastname does not match the disclosed lastname in query result')
+            isCorrect = false
+            break
+          }
+        }
         uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
       } else if (proof.name === 'compare_age') {
         commitmentIn = getCommitmentInFromDisclosureProof(proofData)
@@ -511,20 +782,29 @@ export class ZKPassport {
         const minAge = getMinAgeFromProof(proofData)
         const maxAge = getMaxAgeFromProof(proofData)
         if (queryResult.age) {
-          if (queryResult.age.gte && (queryResult.age.gte.expected as number) >= minAge) {
+          if (
+            queryResult.age.gte &&
+            queryResult.age.gte.result &&
+            minAge < (queryResult.age.gte.expected as number)
+          ) {
             console.warn('Age is not greater than or equal to the expected age')
             isCorrect = false
             break
           }
-          if (queryResult.age.lt && (queryResult.age.lt.expected as number) < maxAge) {
+          if (
+            queryResult.age.lt &&
+            queryResult.age.lt.result &&
+            maxAge >= (queryResult.age.lt.expected as number)
+          ) {
             console.warn('Age is not less than the expected age')
             isCorrect = false
             break
           }
           if (queryResult.age.range) {
             if (
-              (queryResult.age.range.expected[0] as number) < minAge ||
-              (queryResult.age.range.expected[1] as number) >= maxAge
+              queryResult.age.range.result &&
+              (minAge < (queryResult.age.range.expected[0] as number) ||
+                maxAge >= (queryResult.age.range.expected[1] as number))
             ) {
               console.warn('Age is not in the expected range')
               isCorrect = false
@@ -541,6 +821,15 @@ export class ZKPassport {
             isCorrect = false
             break
           }
+          if (
+            queryResult.age.disclose &&
+            (queryResult.age.disclose.result !== minAge ||
+              queryResult.age.disclose.result !== maxAge)
+          ) {
+            console.warn('Age does not match the disclosed age in query result')
+            isCorrect = false
+            break
+          }
         } else {
           console.warn('Age is not set in the query result')
           isCorrect = false
@@ -548,8 +837,8 @@ export class ZKPassport {
         }
         const currentDate = getCurrentDateFromAgeProof(proofData)
         if (
-          currentDate.getTime() !== Date.now() &&
-          currentDate.getTime() !== Date.now() - 86400000
+          currentDate.getTime() !== today.getTime() &&
+          currentDate.getTime() !== today.getTime() - 86400000
         ) {
           console.warn('Current date in the proof is too old')
           isCorrect = false
@@ -568,20 +857,29 @@ export class ZKPassport {
         const minDate = getMinDateFromProof(proofData)
         const maxDate = getMaxDateFromProof(proofData)
         if (queryResult.birthdate) {
-          if (queryResult.birthdate.gte && queryResult.birthdate.gte.expected >= minDate) {
+          if (
+            queryResult.birthdate.gte &&
+            queryResult.birthdate.gte.result &&
+            minDate < queryResult.birthdate.gte.expected
+          ) {
             console.warn('Birthdate is not greater than or equal to the expected birthdate')
             isCorrect = false
             break
           }
-          if (queryResult.birthdate.lte && queryResult.birthdate.lte.expected < maxDate) {
+          if (
+            queryResult.birthdate.lte &&
+            queryResult.birthdate.lte.result &&
+            maxDate > queryResult.birthdate.lte.expected
+          ) {
             console.warn('Birthdate is not less than the expected birthdate')
             isCorrect = false
             break
           }
           if (queryResult.birthdate.range) {
             if (
-              queryResult.birthdate.range.expected[0] < minDate ||
-              queryResult.birthdate.range.expected[1] >= maxDate
+              queryResult.birthdate.range.result &&
+              (minDate < queryResult.birthdate.range.expected[0] ||
+                maxDate > queryResult.birthdate.range.expected[1])
             ) {
               console.warn('Birthdate is not in the expected range')
               isCorrect = false
@@ -591,7 +889,7 @@ export class ZKPassport {
           if (
             !queryResult.birthdate.lte &&
             !queryResult.birthdate.range &&
-            maxDate != defaultDateValue
+            maxDate.getTime() != defaultDateValue.getTime()
           ) {
             console.warn('Maximum birthdate should be equal to default date value')
             isCorrect = false
@@ -600,7 +898,7 @@ export class ZKPassport {
           if (
             !queryResult.birthdate.gte &&
             !queryResult.birthdate.range &&
-            minDate != defaultDateValue
+            minDate.getTime() != defaultDateValue.getTime()
           ) {
             console.warn('Minimum birthdate should be equal to default date value')
             isCorrect = false
@@ -624,20 +922,29 @@ export class ZKPassport {
         const minDate = getMinDateFromProof(proofData)
         const maxDate = getMaxDateFromProof(proofData)
         if (queryResult.expiry_date) {
-          if (queryResult.expiry_date.gte && queryResult.expiry_date.gte.expected >= minDate) {
+          if (
+            queryResult.expiry_date.gte &&
+            queryResult.expiry_date.gte.result &&
+            minDate < queryResult.expiry_date.gte.expected
+          ) {
             console.warn('Expiry date is not greater than or equal to the expected expiry date')
             isCorrect = false
             break
           }
-          if (queryResult.expiry_date.lte && queryResult.expiry_date.lte.expected < maxDate) {
+          if (
+            queryResult.expiry_date.lte &&
+            queryResult.expiry_date.lte.result &&
+            maxDate > queryResult.expiry_date.lte.expected
+          ) {
             console.warn('Expiry date is not less than the expected expiry date')
             isCorrect = false
             break
           }
           if (queryResult.expiry_date.range) {
             if (
-              queryResult.expiry_date.range.expected[0] < minDate ||
-              queryResult.expiry_date.range.expected[1] >= maxDate
+              queryResult.expiry_date.range.result &&
+              (minDate < queryResult.expiry_date.range.expected[0] ||
+                maxDate > queryResult.expiry_date.range.expected[1])
             ) {
               console.warn('Expiry date is not in the expected range')
               isCorrect = false
@@ -647,7 +954,7 @@ export class ZKPassport {
           if (
             !queryResult.expiry_date.lte &&
             !queryResult.expiry_date.range &&
-            maxDate != defaultDateValue
+            maxDate.getTime() != defaultDateValue.getTime()
           ) {
             console.warn('Maximum expiry date should be equal to default date value')
             isCorrect = false
@@ -656,7 +963,7 @@ export class ZKPassport {
           if (
             !queryResult.expiry_date.gte &&
             !queryResult.expiry_date.range &&
-            minDate != defaultDateValue
+            minDate.getTime() != defaultDateValue.getTime()
           ) {
             console.warn('Minimum expiry date should be equal to default date value')
             isCorrect = false
@@ -678,7 +985,11 @@ export class ZKPassport {
           break
         }
         const countryList = getCountryListFromExclusionProof(proofData)
-        if (queryResult.nationality && queryResult.nationality.out) {
+        if (
+          queryResult.nationality &&
+          queryResult.nationality.out &&
+          queryResult.nationality.out.result
+        ) {
           if (
             !queryResult.nationality.out.expected?.every((country) => countryList.includes(country))
           ) {
@@ -686,7 +997,7 @@ export class ZKPassport {
             isCorrect = false
             break
           }
-        } else {
+        } else if (!queryResult.nationality || !queryResult.nationality.out) {
           console.warn('Nationality exclusion is not set in the query result')
           isCorrect = false
           break
@@ -702,7 +1013,11 @@ export class ZKPassport {
           break
         }
         const countryList = getCountryListFromInclusionProof(proofData)
-        if (queryResult.nationality && queryResult.nationality.in) {
+        if (
+          queryResult.nationality &&
+          queryResult.nationality.in &&
+          queryResult.nationality.in.result
+        ) {
           if (
             !queryResult.nationality.in.expected?.every((country) => countryList.includes(country))
           ) {
@@ -710,7 +1025,7 @@ export class ZKPassport {
             isCorrect = false
             break
           }
-        } else {
+        } else if (!queryResult.nationality || !queryResult.nationality.in) {
           console.warn('Nationality inclusion is not set in the query result')
           isCorrect = false
           break
@@ -749,15 +1064,13 @@ export class ZKPassport {
       uniqueIdentifier = uniqueIdentifierFromPublicInputs
       verified = isCorrect
     }
-    for (const proof of proofsToVerify!) {
+    /*for (const proof of proofsToVerify!) {
       const proofData = getProofData(proof.proof as string)
-      console.log('proofData', proofData)
       const hostedPackagedCircuit = await getHostedPackagedCircuitByName(
         proof.version as any,
         proof.name!,
       )
       const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, 'base64')
-      console.log('proofData', proofData)
       verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(vkeyBytes))
       console.log('verified', verified)
       if (!verified) {
@@ -765,8 +1078,8 @@ export class ZKPassport {
         // and don't bother checking the other proofs
         break
       }
-    }
-    delete this.topicToProofs[requestId]
+    }*/
+    this.topicToProofs[requestId] = []
     return { uniqueIdentifier, verified }
   }
 
