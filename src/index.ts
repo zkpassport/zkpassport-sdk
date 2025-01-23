@@ -98,12 +98,47 @@ export {
 } from '@zkpassport/utils'
 
 export type QueryBuilderResult = {
+  /**
+   * The URL of the request.
+   *
+   * You can either encode the URL in a QR code or let the user click the link
+   * to this URL on your website if they're visiting your website on their phone.
+   */
   url: string
+  /**
+   * The id of the request.
+   */
   requestId: string
-  onQRCodeScanned: (callback: () => void) => void
+  /**
+   * Called when the user has scanned the QR code or clicked the link to the request.
+   *
+   * This means the user is currently viewing the request popup with your website information
+   * and the information requested from them.
+   */
+  onRequestReceived: (callback: () => void) => void
+  /**
+   * Called when the user has accepted the request and
+   * started to generate the proof on their phone.
+   */
   onGeneratingProof: (callback: () => void) => void
+  /**
+   * Called when the SDK successfully connects to the bridge with the mobile app.
+   */
   onBridgeConnect: (callback: () => void) => void
+  /**
+   * Called when the user has generated a proof.
+   *
+   * There is a minimum of 4 proofs, but there can be more depending
+   * on the type of information requested from the user.
+   */
   onProofGenerated: (callback: (proof: ProofResult) => void) => void
+  /**
+   * Called when the user has sent the query result.
+   *
+   * The response contains the unique identifier associated to the user,
+   * your domain name and chosen scope, along with the query result and whether
+   * the proofs were successfully verified.
+   */
   onResult: (
     callback: (response: {
       uniqueIdentifier: string | undefined
@@ -111,25 +146,86 @@ export type QueryBuilderResult = {
       result: QueryResult
     }) => void,
   ) => void
+  /**
+   * Called when the user has rejected the request.
+   */
   onReject: (callback: () => void) => void
+  /**
+   * Called when an error occurs, such as one of the requirements not being met
+   * or a proof failing to be generated.
+   */
   onError: (callback: (error: string) => void) => void
+  /**
+   * @returns true if the bridge with the mobile app is connected
+   */
   isBridgeConnected: () => boolean
-  isQRCodeScanned: () => boolean
+  /**
+   * Get if the user has scanned the QR code or the link to this request
+   * @returns true if the request has been received by the user on their phone
+   */
+  requestReceived: () => boolean
 }
 
 export type QueryBuilder = {
+  /**
+   * Requires this attribute to be equal to the value you provide.
+   * @param key The attribute to compare.
+   * @param value The value of the attribute you require.
+   */
   eq: <T extends IDCredential>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  /**
+   * Requires this attribute to be greater than or equal to the value you provide.
+   * @param key The attribute to compare.
+   * @param value The value of the attribute you require.
+   */
   gte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  /**
+   * Requires this attribute to be less than or equal to the value you provide.
+   * @param key The attribute to compare.
+   * @param value The value of the attribute you require.
+   */
   lte: <T extends 'birthdate' | 'expiry_date'>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  /**
+   * Requires this attribute to be less than the value you provide.
+   * @param key The attribute to compare.
+   * @param value The value of the attribute you require.
+   */
   lt: <T extends 'age'>(key: T, value: IDCredentialValue<T>) => QueryBuilder
+  /**
+   * Requires this attribute to be in the range you provide.
+   * @param key The attribute to compare.
+   * @param start The start of the range.
+   * @param end The end of the range.
+   */
   range: <T extends NumericalIDCredential>(
     key: T,
     start: IDCredentialValue<T>,
     end: IDCredentialValue<T>,
   ) => QueryBuilder
+  /**
+   * Requires this attribute to be in the list you provide.
+   * @param key The attribute to compare.
+   * @param value The list of values of the attribute you require.
+   */
   in: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => QueryBuilder
+  /**
+   * Requires this attribute to be in the list you provide.
+   * @param key The attribute to compare.
+   * @param value The list of values of the attribute you require.
+   */
   out: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => QueryBuilder
+  /**
+   * Requires this attribute to be disclosed.
+   * @param key The attribute to disclose.
+   */
   disclose: (key: DisclosableIDCredential) => QueryBuilder
+  /**
+   * Builds the request.
+   *
+   * This will return the URL of the request, which you can either encode in a QR code
+   * or let the user click the link to this URL on your website if they're visiting your website
+   * on their phone. Along with all the callbacks you can use to handle the user's response.
+   */
   done: () => QueryBuilderResult
 }
 
@@ -139,14 +235,14 @@ export class ZKPassport {
   private topicToKeyPair: Record<string, { privateKey: Uint8Array; publicKey: Uint8Array }> = {}
   private topicToWebSocketClient: Record<string, WebSocketClient> = {}
   private topicToSharedSecret: Record<string, Uint8Array> = {}
-  private topicToQRCodeScanned: Record<string, boolean> = {}
+  private topicToRequestReceived: Record<string, boolean> = {}
   private topicToService: Record<
     string,
     { name: string; logo: string; purpose: string; scope?: string }
   > = {}
   private topicToProofs: Record<string, Array<ProofResult>> = {}
 
-  private onQRCodeScannedCallbacks: Record<string, Array<() => void>> = {}
+  private onRequestReceivedCallbacks: Record<string, Array<() => void>> = {}
   private onGeneratingProofCallbacks: Record<string, Array<(topic: string) => void>> = {}
   private onBridgeConnectCallbacks: Record<string, Array<() => void>> = {}
   private onProofGeneratedCallbacks: Record<string, Array<(proof: ProofResult) => void>> = {}
@@ -302,8 +398,8 @@ export class ZKPassport {
         return {
           url: `https://zkpassport.id/r?d=${this.domain}&t=${topic}&c=${base64Config}&s=${base64Service}&p=${pubkey}`,
           requestId: topic,
-          onQRCodeScanned: (callback: () => void) =>
-            this.onQRCodeScannedCallbacks[topic].push(callback),
+          onRequestReceived: (callback: () => void) =>
+            this.onRequestReceivedCallbacks[topic].push(callback),
           onGeneratingProof: (callback: () => void) =>
             this.onGeneratingProofCallbacks[topic].push(callback),
           onBridgeConnect: (callback: () => void) =>
@@ -321,7 +417,7 @@ export class ZKPassport {
           onError: (callback: (error: string) => void) =>
             this.onErrorCallbacks[topic].push(callback),
           isBridgeConnected: () => this.topicToWebSocketClient[topic].readyState === WebSocket.OPEN,
-          isQRCodeScanned: () => this.topicToQRCodeScanned[topic] === true,
+          requestReceived: () => this.topicToRequestReceived[topic] === true,
         }
       },
     }
@@ -358,7 +454,7 @@ export class ZKPassport {
     this.topicToService[topic] = { name, logo, purpose, scope }
     this.topicToProofs[topic] = []
 
-    this.onQRCodeScannedCallbacks[topic] = []
+    this.onRequestReceivedCallbacks[topic] = []
     this.onGeneratingProofCallbacks[topic] = []
     this.onBridgeConnectCallbacks[topic] = []
     this.onProofGeneratedCallbacks[topic] = []
@@ -380,7 +476,7 @@ export class ZKPassport {
         if (data.method === 'handshake') {
           logger.debug('[frontend] Received handshake:', event.data)
 
-          this.topicToQRCodeScanned[topic] = true
+          this.topicToRequestReceived[topic] = true
           this.topicToSharedSecret[topic] = await getSharedSecret(
             bytesToHex(keyPair.privateKey),
             data.params.pubkey,
@@ -399,7 +495,7 @@ export class ZKPassport {
           logger.debug('[frontend] Sending encrypted message:', encryptedMessage)
           wsClient.send(JSON.stringify(encryptedMessage))
 
-          await Promise.all(this.onQRCodeScannedCallbacks[topic].map((callback) => callback()))
+          await Promise.all(this.onRequestReceivedCallbacks[topic].map((callback) => callback()))
           return
         }
 
@@ -1050,7 +1146,8 @@ export class ZKPassport {
    * @param requestId The request ID.
    * @param proofs The proofs to verify.
    * @param queryResult The query result to verify against
-   * @returns True if the proofs are valid, false otherwise.
+   * @returns An object containing the unique identifier associated to the user
+   * and a boolean indicating whether the proofs were successfully verified.
    */
   public async verify(
     requestId: string,
@@ -1130,7 +1227,7 @@ export class ZKPassport {
     delete this.topicToConfig[requestId]
     delete this.topicToSharedSecret[requestId]
     delete this.topicToProofs[requestId]
-    this.onQRCodeScannedCallbacks[requestId] = []
+    this.onRequestReceivedCallbacks[requestId] = []
     this.onGeneratingProofCallbacks[requestId] = []
     this.onBridgeConnectCallbacks[requestId] = []
     this.onProofGeneratedCallbacks[requestId] = []

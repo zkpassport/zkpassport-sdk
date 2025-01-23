@@ -53,14 +53,14 @@ const {
   .out('nationality', ['Sweden', 'Denmark'])
   .done()
 
-// Generate a url with the url and let your user scan it
-// or transform it into a button if the user is on mobile
+// Generate a QR Code with the url and let your user scan it
+// or transform it into a button if the user is on their phone
 
-onQRCodeScanned(() => {
-  // The user scanned the QR code or clicked the button
+onRequestReceived(() => {
+  // The user scanned the QR code or clicked the link to the request
   // Essentially, this means the request popup is now opened
   // on the user phone
-  console.log('QR code scanned')
+  console.log('Request received')
 })
 
 onGeneratingProof(() => {
@@ -68,15 +68,20 @@ onGeneratingProof(() => {
   console.log('Generating proof')
 })
 
-onProofGenerated(({ proof, vkeyHash }: ProofResult) => {
+// You probably don't need to use this callback
+// But if you want to get the proofs and verify them manually, it's here
+onProofGenerated(({ proof, vkeyHash, version, name }: ProofResult) => {
   // One of the proofs has been generated
   // Here, you can retrieve the proof manually and verify it
   // But note that the verification of the proofs is handled
   // automatically by the SDK
   console.log('Proof generated', proof)
   console.log('Verification key hash', vkeyHash)
+  console.log('Version', version)
+  console.log('Name', name)
 })
 
+// That's the callback you're looking for
 onResult(
   ({
     uniqueIdentifier,
