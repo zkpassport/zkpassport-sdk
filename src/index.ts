@@ -168,31 +168,31 @@ export type QueryBuilderResult = {
 
 export type QueryBuilder = {
   /**
-   * Requires this attribute to be equal to the value you provide.
+   * Requires this attribute to be equal to the provided value.
    * @param key The attribute to compare.
    * @param value The value of the attribute you require.
    */
   eq: <T extends IDCredential>(key: T, value: IDCredentialValue<T>) => QueryBuilder
   /**
-   * Requires this attribute to be greater than or equal to the value you provide.
+   * Requires this attribute to be greater than or equal to the provided value.
    * @param key The attribute to compare.
    * @param value The value of the attribute you require.
    */
   gte: <T extends NumericalIDCredential>(key: T, value: IDCredentialValue<T>) => QueryBuilder
   /**
-   * Requires this attribute to be less than or equal to the value you provide.
+   * Requires this attribute to be less than or equal to the provided value.
    * @param key The attribute to compare.
    * @param value The value of the attribute you require.
    */
   lte: <T extends 'birthdate' | 'expiry_date'>(key: T, value: IDCredentialValue<T>) => QueryBuilder
   /**
-   * Requires this attribute to be less than the value you provide.
+   * Requires this attribute to be less than the provided value.
    * @param key The attribute to compare.
    * @param value The value of the attribute you require.
    */
   lt: <T extends 'age'>(key: T, value: IDCredentialValue<T>) => QueryBuilder
   /**
-   * Requires this attribute to be in the range you provide.
+   * Requires this attribute to be included in the provided range.
    * @param key The attribute to compare.
    * @param start The start of the range.
    * @param end The end of the range.
@@ -203,15 +203,15 @@ export type QueryBuilder = {
     end: IDCredentialValue<T>,
   ) => QueryBuilder
   /**
-   * Requires this attribute to be in the list you provide.
+   * Requires this attribute to be included in the provided list.
    * @param key The attribute to compare.
-   * @param value The list of values of the attribute you require.
+   * @param value The list of values to check inclusion against.
    */
   in: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => QueryBuilder
   /**
-   * Requires this attribute to be in the list you provide.
+   * Requires this attribute to be excluded from the provided list.
    * @param key The attribute to compare.
-   * @param value The list of values of the attribute you require.
+   * @param value The list of values to check exclusion against.
    */
   out: <T extends 'nationality'>(key: T, value: IDCredentialValue<T>[]) => QueryBuilder
   /**
@@ -223,8 +223,8 @@ export type QueryBuilder = {
    * Builds the request.
    *
    * This will return the URL of the request, which you can either encode in a QR code
-   * or let the user click the link to this URL on your website if they're visiting your website
-   * on their phone. Along with all the callbacks you can use to handle the user's response.
+   * or provide as a link to the user if they're visiting your website on their phone.
+   * It also returns all the callbacks you can use to handle the user's response.
    */
   done: () => QueryBuilderResult
 }

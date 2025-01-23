@@ -40,7 +40,7 @@ const queryBuilder = await zkPassport.request({
 const {
   url,
   requestId,
-  onQRCodeScanned,
+  onRequestReceived,
   onGeneratingProof,
   onProofGenerated,
   onResult,
