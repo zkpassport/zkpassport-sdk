@@ -1,4 +1,4 @@
-# zkpassport-sdk
+# ZKPassport SDK
 
 Privacy-preserving identity verification using passports and ID cards.
 

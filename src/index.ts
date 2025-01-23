@@ -36,10 +36,9 @@ import { getWebSocketClient, WebSocketClient } from './websocket'
 import { createEncryptedJsonRpcRequest } from './json-rpc'
 import { decrypt, generateECDHKeyPair, getSharedSecret } from './encryption'
 import logger from './logger'
-import { BackendOptions, BarretenbergVerifier, UltraHonkBackend } from '@aztec/bb.js'
 import { ungzip } from 'node-gzip'
-import initNoirC from '@noir-lang/noirc_abi'
-import initACVM from '@noir-lang/acvm_js'
+//import initNoirC from '@noir-lang/noirc_abi'
+//import initACVM from '@noir-lang/acvm_js'
 
 registerLocale(require('i18n-iso-countries/langs/en.json'))
 
@@ -163,7 +162,7 @@ export class ZKPassport {
   > = {}
   private onRejectCallbacks: Record<string, Array<() => void>> = {}
   private onErrorCallbacks: Record<string, Array<(topic: string) => void>> = {}
-  private wasmVerifierInit: boolean = false
+  //private wasmVerifierInit: boolean = false
 
   constructor(_domain?: string) {
     if (!_domain && typeof window === 'undefined') {
@@ -473,9 +472,8 @@ export class ZKPassport {
       return getIndex(a) - getIndex(b)
     })
 
-    console.log('sortedProofs', sortedProofs)
     for (const proof of sortedProofs!) {
-      const proofData = getProofData(proof.proof as string)
+      const proofData = getProofData(proof.proof as string, true)
       if (proof.name?.startsWith('sig_check_dsc')) {
         commitmentOut = getCommitmentFromDSCProof(proofData)
         const merkleRoot = getMerkleRootFromDSCProof(proofData)
@@ -1066,6 +1064,7 @@ export class ZKPassport {
         throw new Error('No proofs to verify')
       }
     }
+    const { BarretenbergVerifier } = await import('@aztec/bb.js')
     const verifier = new BarretenbergVerifier()
     /*if (!this.wasmVerifierInit) {
       await this.initWasmVerifier()
@@ -1078,35 +1077,26 @@ export class ZKPassport {
       uniqueIdentifier = uniqueIdentifierFromPublicInputs
       verified = isCorrect
     }
-    for (const proof of proofsToVerify!) {
-      const proofData = getProofData(proof.proof as string)
-      console.log('proofData', typeof proofData.proof)
-      const hostedPackagedCircuit = await getHostedPackagedCircuitByName(
-        proof.version as any,
-        proof.name!,
-      )
-      /*const backend = new UltraHonkBackend(
-        hostedPackagedCircuit.bytecode,
-        {},
-        {
-          recursive: true,
-        },
-      )*/
-      const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, 'base64')
-      console.log('circuit name', hostedPackagedCircuit.name)
-      console.log('proof bytes', JSON.stringify(Array.from(proofData.proof)))
-      try {
-        verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(vkeyBytes))
-        //verified = await backend.verifyProof(proofData)
-      } catch (e) {
-        console.warn('Error verifying proof', e)
-        verified = false
-      }
-      console.log('verified', verified)
-      if (!verified) {
-        // Break the loop if the proof is not valid
-        // and don't bother checking the other proofs
-        break
+    // Only proceed with the proof verification if the public inputs are correct
+    if (verified) {
+      for (const proof of proofsToVerify!) {
+        const proofData = getProofData(proof.proof as string, true)
+        const hostedPackagedCircuit = await getHostedPackagedCircuitByName(
+          proof.version as any,
+          proof.name!,
+        )
+        const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, 'base64')
+        try {
+          verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(vkeyBytes))
+        } catch (e) {
+          console.warn('Error verifying proof', e)
+          verified = false
+        }
+        if (!verified) {
+          // Break the loop if the proof is not valid
+          // and don't bother checking the other proofs
+          break
+        }
       }
     }
     this.topicToProofs[requestId] = []
