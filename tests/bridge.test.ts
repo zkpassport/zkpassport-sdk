@@ -1,10 +1,12 @@
-import { ZkPassport as ZkPassportVerifier } from '../src'
+import { ZKPassport as ZkPassportVerifier } from '../src/index'
 import { ZkPassportProver } from '../src/mobile'
-import { expect, test, describe, mock, jest, beforeEach } from 'bun:test'
 import { MockWebSocket } from './helpers/MockWebSocket'
-import { simulateHelloFromFrontend, simulateHandshakeFromMobile, waitForCallback } from './helpers/utils'
+import {
+  simulateHelloFromFrontend,
+  simulateHandshakeFromMobile,
+  waitForCallback,
+} from './helpers/utils'
 import { hexToBytes } from '@noble/ciphers/utils'
-import { sleep } from 'bun'
 
 const topic = 'abc456'
 const keyPairFrontend = {
@@ -15,62 +17,24 @@ const keyPairMobile = {
   privateKey: hexToBytes('5af6bf929ab3b5e2f5720804bec6e6f21e2bddc359d33b37aebd3bcdc55ed80e'),
   publicKey: hexToBytes('03ca2d5fb061bc822e1a45c598eddc08069c37fefe096047a90a7ff9cb7db488aa'),
 }
-let wsClient: MockWebSocket
 
-mock.module('../src/websocket', () => {
+let wsClient: MockWebSocket | null = null
+
+jest.mock('../src/websocket', () => {
   return {
     getWebSocketClient: jest.fn((url: string, origin?: string) => {
-      wsClient = new MockWebSocket(url, {
+      const wsClientInstance = new MockWebSocket(url, {
         headers: {
           Origin: origin || 'nodejs',
         },
       })
-      return wsClient
+      wsClient = wsClientInstance
+      return wsClientInstance
     }),
   }
 })
 
-describe('ZKpassport Verifier (Frontend)', () => {
-  let zkPassport: ZkPassportVerifier
-
-  beforeEach(() => {
-    zkPassport = new ZkPassportVerifier('localhost')
-  })
-
-  test('should connect to websocket bridge', async () => {
-    const queryBuilder = await zkPassport.request({
-      keyPairOverride: keyPairFrontend,
-      topicOverride: topic,
-    })
-    const {
-      url,
-      requestId,
-      onQRCodeScanned,
-      onGeneratingProof,
-      onProofGenerated,
-      onReject,
-      onError,
-      isBridgeConnected,
-      onBridgeConnect,
-      isQRCodeScanned,
-    } = queryBuilder.done()
-
-    expect(requestId).toBe(topic)
-
-    // Wait for the bridge to connect
-    expect(isBridgeConnected()).toBe(false)
-    await waitForCallback(onBridgeConnect)
-    expect(isBridgeConnected()).toBe(true)
-
-    // Wait for the user to scan QR code (handshake)
-    expect(isQRCodeScanned()).toBe(false)
-    await simulateHandshakeFromMobile(wsClient, keyPairMobile.publicKey)
-    await waitForCallback(onQRCodeScanned)
-    expect(isQRCodeScanned()).toBe(true)
-  })
-})
-
-describe('ZKpassport Prover (Mobile)', () => {
+describe('Prover (mobile)', () => {
   let zkPassportProver: ZkPassportProver
 
   beforeEach(async () => {
@@ -99,8 +63,48 @@ describe('ZKpassport Prover (Mobile)', () => {
 
     // Wait for the domain to be verified
     expect(isDomainVerified()).toBe(false)
-    await simulateHelloFromFrontend(wsClient, keyPairFrontend, keyPairMobile, topic)
+    await simulateHelloFromFrontend(wsClient!, keyPairFrontend, keyPairMobile, topic)
     await waitForCallback(onDomainVerified)
     expect(isDomainVerified()).toBe(true)
+  })
+})
+
+describe('Verifier (frontend)', () => {
+  let zkPassport: ZkPassportVerifier
+
+  beforeEach(() => {
+    zkPassport = new ZkPassportVerifier('localhost')
+  })
+
+  test('connect to websocket bridge', async () => {
+    const queryBuilder = await zkPassport.request({
+      name: 'Test App',
+      logo: 'https://test.com/logo.png',
+      purpose: 'Testing connection',
+      keyPairOverride: keyPairFrontend,
+      topicOverride: topic,
+    })
+
+    const {
+      url,
+      requestId,
+      onRequestReceived,
+      onGeneratingProof,
+      onProofGenerated,
+      onResult,
+      onBridgeConnect,
+      isBridgeConnected,
+    } = queryBuilder.done()
+
+    expect(requestId).toBe(topic)
+
+    // Wait for the bridge to connect
+    expect(isBridgeConnected()).toBe(false)
+    await waitForCallback(onBridgeConnect)
+    expect(isBridgeConnected()).toBe(true)
+
+    // Wait for the handshake
+    await simulateHandshakeFromMobile(wsClient!, keyPairMobile.publicKey)
+    await waitForCallback(onRequestReceived)
   })
 })
