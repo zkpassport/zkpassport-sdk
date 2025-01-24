@@ -1158,7 +1158,7 @@ export class ZKPassport {
     if (!proofs) {
       proofsToVerify = this.topicToProofs[requestId]
       if (!proofsToVerify || proofsToVerify.length === 0) {
-        throw new Error("No proofs to verify")
+        return { uniqueIdentifier: undefined, verified: false }
       }
     }
     const { BarretenbergVerifier } = await import("@aztec/bb.js")
