@@ -75,16 +75,31 @@ describe("Query Builder", () => {
 
   test("should build nationality inclusion/exclusion query with validation", async () => {
     const result = queryBuilder
-      .in("nationality", ["FR", "DE", "IT"])
-      .out("nationality", ["USA", "GB"])
+      .in("nationality", ["FRA", "DEU", "ITA"])
+      .out("nationality", ["USA", "GBR"])
       .done()
 
     const configPart = result.url.split("c=")[1].split("&")[0]
     const config = JSON.parse(Buffer.from(configPart, "base64").toString())
 
     expect(config.nationality).toEqual({
-      in: ["FR", "DE", "IT"],
-      out: ["USA", "GB"],
+      in: ["FRA", "DEU", "ITA"],
+      out: ["USA", "GBR"],
+    })
+  })
+
+  test("should convert country names to Alpha-3 codes in nationality inclusion/exclusion query", async () => {
+    const result = queryBuilder
+      .in("nationality", ["France", "Germany", "Italy"])
+      .out("nationality", ["United States", "United Kingdom"])
+      .done()
+
+    const configPart = result.url.split("c=")[1].split("&")[0]
+    const config = JSON.parse(Buffer.from(configPart, "base64").toString())
+
+    expect(config.nationality).toEqual({
+      in: ["FRA", "DEU", "ITA"],
+      out: ["USA", "GBR"],
     })
   })
 
@@ -105,7 +120,7 @@ describe("Query Builder", () => {
     const result = queryBuilder
       .eq("document_type", "passport")
       .gte("age", 18)
-      .in("nationality", ["FR", "DE"])
+      .in("nationality", ["FRA", "DEU"])
       .disclose("fullname")
       .range("expiry_date", startDate, new Date("2025-01-01"))
       .done()
@@ -117,7 +132,7 @@ describe("Query Builder", () => {
     expect(config).toEqual({
       document_type: { eq: "passport" },
       age: { gte: 18 },
-      nationality: { in: ["FR", "DE"] },
+      nationality: { in: ["FRA", "DEU"] },
       fullname: { disclose: true },
       expiry_date: { range: [startDate.toISOString(), new Date("2025-01-01").toISOString()] },
     })
