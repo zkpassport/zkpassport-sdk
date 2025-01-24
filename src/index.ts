@@ -1155,9 +1155,13 @@ export class ZKPassport {
     queryResult?: QueryResult,
   ): Promise<{ uniqueIdentifier: string | undefined; verified: boolean }> {
     let proofsToVerify = proofs
-    if (!proofs) {
+    // There is a minimum of 4 subproofs to make a complete proof
+    if (!proofs || proofs.length < 4) {
       proofsToVerify = this.topicToProofs[requestId]
-      if (!proofsToVerify || proofsToVerify.length === 0) {
+      if (!proofsToVerify || proofsToVerify.length < 4) {
+        // It may happen that a request returns a result without proofs
+        // Meaning the ID is supported yet by ZKPassport circuits,
+        // so the results has to be trusted and cannot be independently verified
         return { uniqueIdentifier: undefined, verified: false }
       }
     }
