@@ -421,9 +421,25 @@ export class ZKPassport {
         await this.handleResult(topic)
       }
     } else if (request.method === "error") {
-      await Promise.all(
-        this.onErrorCallbacks[topic].map((callback) => callback(request.params.error)),
-      )
+      const error = request.params.error
+      if (error && error === "This ID is not supported yet") {
+        // This means the user has an ID that is not supported yet
+        // So we won't receive any proofs and we can handle the result now
+        this.topicToExpectedProofCount[topic] = 0
+        if (this.topicToResults[topic]) {
+          await this.handleResult(topic)
+        }
+      } else if (error && error.startsWith("Cannot generate proof")) {
+        // This means one of the disclosure proofs failed to be generated
+        // So we need to remove one from the expected proof count
+        this.topicToExpectedProofCount[topic] -= 1
+        // If the expected proof count is now equal to the number of proofs received,
+        // we can handle the result now
+        if (this.topicToExpectedProofCount[topic] === this.topicToProofs[topic].length) {
+          await this.handleResult(topic)
+        }
+      }
+      await Promise.all(this.onErrorCallbacks[topic].map((callback) => callback(error)))
     }
   }
 
@@ -1202,6 +1218,18 @@ export class ZKPassport {
           isCorrect = false
           break
         }
+        // Check the countryList is in ascending order
+        // If the prover doesn't use a sorted list then the proof cannot be trusted
+        // as it is requirement in the circuit for the exclusion check to work
+        for (let i = 1; i < countryList.length; i++) {
+          if (countryList[i] < countryList[i - 1]) {
+            console.warn(
+              "The nationality exclusion list has not been sorted, and thus the proof cannot be trusted",
+            )
+            isCorrect = false
+            break
+          }
+        }
         uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
       } else if (proof.name === "inclusion_check_country") {
         commitmentIn = getCommitmentInFromDisclosureProof(proofData)
@@ -1255,7 +1283,7 @@ export class ZKPassport {
       proofsToVerify = this.topicToProofs[requestId]
       if (!proofsToVerify || proofsToVerify.length < 4) {
         // It may happen that a request returns a result without proofs
-        // Meaning the ID is supported yet by ZKPassport circuits,
+        // Meaning the ID is not supported yet by ZKPassport circuits,
         // so the results has to be trusted and cannot be independently verified
         return { uniqueIdentifier: undefined, verified: false }
       }
