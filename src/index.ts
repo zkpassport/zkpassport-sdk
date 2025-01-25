@@ -433,9 +433,12 @@ export class ZKPassport {
         // This means one of the disclosure proofs failed to be generated
         // So we need to remove one from the expected proof count
         this.topicToExpectedProofCount[topic] -= 1
-        // If the expected proof count is now equal to the number of proofs received,
-        // we can handle the result now
-        if (this.topicToExpectedProofCount[topic] === this.topicToProofs[topic].length) {
+        // If the expected proof count is now equal to the number of proofs received
+        // and the results were received, we can handle the result now
+        if (
+          this.topicToResults[topic] &&
+          this.topicToExpectedProofCount[topic] === this.topicToProofs[topic].length
+        ) {
           await this.handleResult(topic)
         }
       }
