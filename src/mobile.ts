@@ -3,7 +3,9 @@ import { getWebSocketClient, WebSocketClient } from "./websocket"
 import { sendEncryptedJsonRpcRequest } from "./json-rpc"
 import { decrypt, generateECDHKeyPair, getSharedSecret } from "./encryption"
 import type { JsonRpcRequest } from "@zkpassport/utils"
-import { noLogger as logger } from "./logger"
+import debug from "debug"
+
+const log = debug("zkpassport:bridge:mobile")
 
 export class ZkPassportProver {
   private domain?: string
@@ -21,6 +23,7 @@ export class ZkPassportProver {
 
   /**
    * @notice Handle an encrypted message.
+   * @param topic The topic of the request.
    * @param request The request.
    * @param outerRequest The outer request.
    */
@@ -29,9 +32,9 @@ export class ZkPassportProver {
     request: JsonRpcRequest,
     outerRequest: JsonRpcRequest,
   ) {
-    logger.debug("Received encrypted message:", request)
+    log("Decrypted message:", request)
     if (request.method === "hello") {
-      logger.info(`Successfully verified origin domain name: ${outerRequest.origin}`)
+      log(`Verified origin domain name: ${outerRequest.origin}`)
       this.topicToRemoteDomainVerified[topic] = true
       await Promise.all(this.onDomainVerifiedCallbacks[topic].map((callback) => callback()))
     } else if (request.method === "closed_page") {
@@ -39,10 +42,6 @@ export class ZkPassportProver {
     }
   }
 
-  /**
-   * @notice Scan a credentirequest QR code.
-   * @returns
-   */
   public async scan(
     url: string,
     {
@@ -85,9 +84,9 @@ export class ZkPassportProver {
     this.topicToWebSocketClient[topic] = wsClient
 
     wsClient.onopen = async () => {
-      logger.info("[mobile] WebSocket connection established")
+      log("WebSocket connected")
       await Promise.all(this.onBridgeConnectCallbacks[topic].map((callback) => callback()))
-      // Server sends handshake automatically (when it sees a pubkey in websocket URI)
+      // Server sends handshake automatically (when it sees a pubkey param in websocket URI)
       // wsClient.send(
       //   JSON.stringify(
       //     createJsonRpcRequest('handshake', {
@@ -98,21 +97,22 @@ export class ZkPassportProver {
     }
 
     wsClient.addEventListener("message", async (event: any) => {
-      logger.info("[mobile] Received message:", event.data)
-
       try {
         const data: JsonRpcRequest = JSON.parse(event.data)
         const originDomain = data.origin ? new URL(data.origin).hostname : undefined
+
         // Origin domain must match domain in QR code
         if (originDomain !== this.domain) {
-          logger.warn(
-            `[mobile] Origin does not match domain in QR code. Expected ${this.domain} but got ${originDomain}`,
+          log(
+            `WARNING: Origin does not match domain in QR code. Expected ${this.domain} but got ${originDomain}`,
           )
+          log("Ignoring received message:", event.data)
           return
         }
 
         if (data.method === "encryptedMessage") {
-          // Decode the payload from base64 to Uint8Array
+          log("Received encrypted message:", event.data)
+          // Decode the base64 payload
           const payload = new Uint8Array(
             atob(data.params.payload)
               .split("")
@@ -124,16 +124,18 @@ export class ZkPassportProver {
             const decryptedJson: JsonRpcRequest = JSON.parse(decrypted)
             await this.handleEncryptedMessage(topic, decryptedJson, data)
           } catch (error) {
-            logger.error("[mobile] Error decrypting message:", error)
+            log("Error decrypting message:", error)
           }
+        } else {
+          log("Received message:", event.data)
         }
       } catch (error) {
-        logger.error("[mobile] Error:", error)
+        log("Error:", error)
       }
     })
 
     wsClient.onerror = (error: Event) => {
-      logger.error("[mobile] WebSocket error:", error)
+      log("WebSocket Error:", error)
     }
 
     return {

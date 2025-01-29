@@ -36,11 +36,14 @@ import { bytesToHex } from "@noble/ciphers/utils"
 import { getWebSocketClient, WebSocketClient } from "./websocket"
 import { createEncryptedJsonRpcRequest } from "./json-rpc"
 import { decrypt, generateECDHKeyPair, getSharedSecret } from "./encryption"
-import { noLogger as logger } from "./logger"
 import { ungzip } from "node-gzip"
 //import initNoirC from '@noir-lang/noirc_abi'
 //import initACVM from '@noir-lang/acvm_js'
 import i18en from "i18n-iso-countries/langs/en.json"
+import debug from "debug"
+
+const log = debug("zkpassport")
+const logFrontend = debug("zkpassport:frontend")
 
 registerLocale(i18en)
 
@@ -378,15 +381,15 @@ export class ZKPassport {
     request: JsonRpcRequest,
     outerRequest: JsonRpcRequest,
   ) {
-    logger.debug("Received encrypted message:", request)
+    log("Received encrypted message:", request)
     if (request.method === "accept") {
-      logger.debug(`User accepted the request and is generating a proof`)
+      log(`User accepted the request and is generating a proof`)
       await Promise.all(this.onGeneratingProofCallbacks[topic].map((callback) => callback(topic)))
     } else if (request.method === "reject") {
-      logger.debug(`User rejected the request`)
+      log(`User rejected the request`)
       await Promise.all(this.onRejectCallbacks[topic].map((callback) => callback()))
     } else if (request.method === "proof") {
-      logger.debug(`User generated proof`)
+      log(`User generated proof`)
       // Uncompress the proof and convert it to a hex string
       const bytesProof = Buffer.from(request.params.proof, "base64")
       const uncompressedProof = await ungzip(bytesProof)
@@ -413,7 +416,7 @@ export class ZKPassport {
         await this.handleResult(topic)
       }
     } else if (request.method === "done") {
-      logger.debug(`User sent the query result`)
+      log(`User sent the query result`)
       this.topicToResults[topic] = request.params
       // Make sure all the proofs have been received, otherwise we'll handle the result later
       // once the proofs have all been received
@@ -579,24 +582,24 @@ export class ZKPassport {
     const wsClient = getWebSocketClient(`wss://bridge.zkpassport.id?topic=${topic}`, this.domain)
     this.topicToWebSocketClient[topic] = wsClient
     wsClient.onopen = async () => {
-      logger.info("[frontend] WebSocket connection established")
+      logFrontend("WebSocket connection established")
       await Promise.all(this.onBridgeConnectCallbacks[topic].map((callback) => callback()))
     }
     wsClient.addEventListener("message", async (event: any) => {
-      logger.debug("[frontend] Received message:", event.data)
+      logFrontend("Received message:", event.data)
       try {
         const data: JsonRpcRequest = JSON.parse(event.data)
         // Handshake happens when the mobile app scans the QR code and connects to the bridge
         if (data.method === "handshake") {
-          logger.debug("[frontend] Received handshake:", event.data)
+          logFrontend("Received handshake:", event.data)
 
           this.topicToRequestReceived[topic] = true
           this.topicToSharedSecret[topic] = await getSharedSecret(
             bytesToHex(keyPair.privateKey),
             data.params.pubkey,
           )
-          logger.debug(
-            "[frontend] Shared secret:",
+          logFrontend(
+            "Shared secret:",
             Buffer.from(this.topicToSharedSecret[topic]).toString("hex"),
           )
 
@@ -606,7 +609,7 @@ export class ZKPassport {
             this.topicToSharedSecret[topic],
             topic,
           )
-          logger.debug("[frontend] Sending encrypted message:", encryptedMessage)
+          logFrontend("Sending encrypted message:", encryptedMessage)
           wsClient.send(JSON.stringify(encryptedMessage))
 
           await Promise.all(this.onRequestReceivedCallbacks[topic].map((callback) => callback()))
@@ -627,16 +630,16 @@ export class ZKPassport {
             const decryptedJson: JsonRpcRequest = JSON.parse(decrypted)
             this.handleEncryptedMessage(topic, decryptedJson, data)
           } catch (error) {
-            logger.error("[frontend] Error decrypting message:", error)
+            logFrontend("Error decrypting message:", error)
           }
           return
         }
       } catch (error) {
-        logger.error("[frontend] Error:", error)
+        logFrontend("Error:", error)
       }
     })
     wsClient.onerror = (error: Event) => {
-      logger.error("[frontend] WebSocket error:", error)
+      logFrontend("WebSocket error:", error)
     }
     return this.getZkPassportRequest(topic)
   }

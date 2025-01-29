@@ -1,7 +1,8 @@
 import { ZkPassportProver } from "../src/mobile"
 import { ZKPassport, SANCTIONED_COUNTRIES } from "../src/index"
-import { customLogger as logger } from "../src/logger"
+import debug from "debug"
 
+const log = debug("zkpassport:simulate")
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 if (process.argv.length < 3) {
@@ -32,7 +33,7 @@ async function main() {
 
     // Once the domain is verified, the accept button can be enabled, allowing the user to generate a proof
     onDomainVerified(async () => {
-      logger.info("Website domain verified!")
+      log("Website domain verified!")
       notifyAccept()
       await sleep(3000)
       notifyDone({
@@ -80,23 +81,23 @@ async function main() {
     console.log(url)
 
     onRequestReceived(() => {
-      logger.info("Request received (QR code scanned)")
+      log("Request received (QR code scanned)")
     })
 
     onGeneratingProof(() => {
-      logger.info("Generating proof")
+      log("Generating proof")
     })
 
     onProofGenerated((proof) => {
-      logger.info("Proof generated", proof)
+      log("Proof generated", proof)
     })
 
     onReject(() => {
-      logger.info("User rejected")
+      log("User rejected")
     })
 
     onError((error) => {
-      logger.error("Error", error)
+      log("Error", error)
     })
   }
 }

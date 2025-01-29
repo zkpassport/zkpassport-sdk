@@ -2,7 +2,9 @@ import { randomBytes } from "crypto"
 import type { JsonRpcRequest, JsonRpcResponse } from "@zkpassport/utils"
 import { encrypt } from "./encryption"
 import { WebSocketClient } from "./websocket"
-import { noLogger as logger } from "./logger"
+import debug from "debug"
+
+const log = debug("zkpassport:bridge")
 
 export function createJsonRpcRequest(method: string, params: any): JsonRpcRequest {
   return {
@@ -42,12 +44,12 @@ export async function sendEncryptedJsonRpcRequest(
     const request = createJsonRpcRequest("encryptedMessage", {
       payload: Buffer.from(encryptedMessage).toString("base64"),
     })
-    logger.debug("Sending encrypted message (original):", message)
-    logger.debug("Sending encrypted message (encrypted):", request)
+    log("Sending encrypted message (original):", message)
+    log("Sending encrypted message (encrypted):", request)
     wsClient.send(JSON.stringify(request))
     return true
   } catch (error) {
-    logger.error("Error sending encrypted message:", error)
+    log("Error sending encrypted message:", error)
     return false
   }
 }
