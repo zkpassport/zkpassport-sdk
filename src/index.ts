@@ -276,6 +276,7 @@ export class ZKPassport {
   > = {}
   private topicToProofs: Record<string, Array<ProofResult>> = {}
   private topicToExpectedProofCount: Record<string, number> = {}
+  private topicToFailedProofCount: Record<string, number> = {}
   private topicToResults: Record<string, QueryResult> = {}
 
   private onRequestReceivedCallbacks: Record<string, Array<() => void>> = {}
@@ -320,17 +321,21 @@ export class ZKPassport {
       this.topicToProofs[topic],
       result,
     )
+    const hasFailedProofs = this.topicToFailedProofCount[topic] > 0
     await Promise.all(
       this.onResultCallbacks[topic].map((callback) =>
         callback({
-          uniqueIdentifier,
-          verified,
+          // If there are failed proofs, we don't return the unique identifier
+          // and we set the verified result to false
+          uniqueIdentifier: hasFailedProofs ? undefined : uniqueIdentifier,
+          verified: hasFailedProofs ? false : verified,
           result,
         }),
       ),
     )
-    // Clear the expected proof count
+    // Clear the expected proof count and failed proof count
     delete this.topicToExpectedProofCount[topic]
+    delete this.topicToFailedProofCount[topic]
   }
 
   private setExpectedProofCount(topic: string) {
@@ -381,6 +386,7 @@ export class ZKPassport {
     // Each separate needed circuit adds 1 disclosure proof
     this.topicToExpectedProofCount[topic] =
       neededCircuits.length === 0 ? 4 : 3 + neededCircuits.length
+    this.topicToFailedProofCount[topic] = 0
   }
 
   /**
@@ -441,6 +447,7 @@ export class ZKPassport {
         // This means the user has an ID that is not supported yet
         // So we won't receive any proofs and we can handle the result now
         this.topicToExpectedProofCount[topic] = 0
+        this.topicToFailedProofCount[topic] += this.topicToExpectedProofCount[topic]
         if (this.topicToResults[topic]) {
           await this.handleResult(topic)
         }
@@ -448,6 +455,7 @@ export class ZKPassport {
         // This means one of the disclosure proofs failed to be generated
         // So we need to remove one from the expected proof count
         this.topicToExpectedProofCount[topic] -= 1
+        this.topicToFailedProofCount[topic] += 1
         // If the expected proof count is now equal to the number of proofs received
         // and the results were received, we can handle the result now
         if (
@@ -1382,14 +1390,17 @@ export class ZKPassport {
    * @param requestId The request ID.
    */
   public cancelRequest(requestId: string) {
-    this.topicToWebSocketClient[requestId].close()
-    delete this.topicToWebSocketClient[requestId]
+    if (this.topicToWebSocketClient[requestId]) {
+      this.topicToWebSocketClient[requestId].close()
+      delete this.topicToWebSocketClient[requestId]
+    }
     delete this.topicToKeyPair[requestId]
     delete this.topicToConfig[requestId]
     delete this.topicToLocalConfig[requestId]
     delete this.topicToSharedSecret[requestId]
     delete this.topicToProofs[requestId]
     delete this.topicToExpectedProofCount[requestId]
+    delete this.topicToFailedProofCount[requestId]
     delete this.topicToResults[requestId]
     this.onRequestReceivedCallbacks[requestId] = []
     this.onGeneratingProofCallbacks[requestId] = []
@@ -1397,5 +1408,14 @@ export class ZKPassport {
     this.onProofGeneratedCallbacks[requestId] = []
     this.onRejectCallbacks[requestId] = []
     this.onErrorCallbacks[requestId] = []
+  }
+
+  /**
+   * @notice Clears all requests.
+   */
+  public clearAllRequests() {
+    for (const requestId in this.topicToWebSocketClient) {
+      this.cancelRequest(requestId)
+    }
   }
 }
