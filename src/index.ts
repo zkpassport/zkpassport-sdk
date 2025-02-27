@@ -532,12 +532,12 @@ export class ZKPassport {
         rangeCompare(key, [start, end], topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      in: <T extends "nationality">(key: T, value: IDCredentialValue<T>[]) => {
+      in: <T extends "nationality" | "issuing_country">(key: T, value: IDCredentialValue<T>[]) => {
         value = value.map((v) => normalizeCountry(v as CountryName)) as IDCredentialValue<T>[]
         generalCompare("in", key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
       },
-      out: <T extends "nationality">(key: T, value: IDCredentialValue<T>[]) => {
+      out: <T extends "nationality" | "issuing_country">(key: T, value: IDCredentialValue<T>[]) => {
         value = value.map((v) => normalizeCountry(v as CountryName)) as IDCredentialValue<T>[]
         generalCompare("out", key, value, topic, this.topicToConfig)
         return this.getZkPassportRequest(topic)
@@ -755,8 +755,10 @@ export class ZKPassport {
         "compare_age",
         "compare_birthdate",
         "compare_expiry",
-        "exclusion_check_country",
-        "inclusion_check_country",
+        "exclusion_check_nationality",
+        "inclusion_check_nationality",
+        "exclusion_check_issuing_country",
+        "inclusion_check_issuing_country",
       ]
       const getIndex = (proof: ProofResult) => {
         const name = proof.name || ""
@@ -1470,18 +1472,18 @@ export class ZKPassport {
           }
         }
         uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
-      } else if (proof.name === "exclusion_check_country") {
+      } else if (proof.name === "exclusion_check_nationality") {
         commitmentIn = getCommitmentInFromDisclosureProof(proofData)
         if (commitmentIn !== commitmentOut) {
           console.warn(
-            "Failed to check the link between the validity of the ID and the country exclusion check",
+            "Failed to check the link between the validity of the ID and the nationality exclusion check",
           )
           isCorrect = false
           queryResultErrors.nationality.commitment = {
             expected: `Commitment: ${commitmentOut}`,
             received: `Commitment: ${commitmentIn}`,
             message:
-              "Failed to check the link between the validity of the ID and the country exclusion check",
+              "Failed to check the link between the validity of the ID and the nationality exclusion check",
           }
         }
         const countryList = getCountryListFromExclusionProof(proofData)
@@ -1493,12 +1495,12 @@ export class ZKPassport {
           if (
             !queryResult.nationality.out.expected?.every((country) => countryList.includes(country))
           ) {
-            console.warn("Country exclusion list does not match the one from the query results")
+            console.warn("Nationality exclusion list does not match the one from the query results")
             isCorrect = false
             queryResultErrors.nationality.out = {
               expected: queryResult.nationality.out.expected,
               received: countryList,
-              message: "Country exclusion list does not match the one from the query results",
+              message: "Nationality exclusion list does not match the one from the query results",
             }
           }
         } else if (!queryResult.nationality || !queryResult.nationality.out) {
@@ -1524,18 +1526,77 @@ export class ZKPassport {
           }
         }
         uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
-      } else if (proof.name === "inclusion_check_country") {
+      } else if (proof.name === "exclusion_check_issuing_country") {
         commitmentIn = getCommitmentInFromDisclosureProof(proofData)
         if (commitmentIn !== commitmentOut) {
           console.warn(
-            "Failed to check the link between the validity of the ID and the country inclusion check",
+            "Failed to check the link between the validity of the ID and the issuing country exclusion check",
           )
           isCorrect = false
           queryResultErrors.nationality.commitment = {
             expected: `Commitment: ${commitmentOut}`,
             received: `Commitment: ${commitmentIn}`,
             message:
-              "Failed to check the link between the validity of the ID and the country inclusion check",
+              "Failed to check the link between the validity of the ID and the issuing country exclusion check",
+          }
+        }
+        const countryList = getCountryListFromExclusionProof(proofData)
+        if (
+          queryResult.issuing_country &&
+          queryResult.issuing_country.out &&
+          queryResult.issuing_country.out.result
+        ) {
+          if (
+            !queryResult.issuing_country.out.expected?.every((country) =>
+              countryList.includes(country),
+            )
+          ) {
+            console.warn(
+              "Issuing country exclusion list does not match the one from the query results",
+            )
+            isCorrect = false
+            queryResultErrors.issuing_country.out = {
+              expected: queryResult.issuing_country.out.expected,
+              received: countryList,
+              message:
+                "Issuing country exclusion list does not match the one from the query results",
+            }
+          }
+        } else if (!queryResult.issuing_country || !queryResult.issuing_country.out) {
+          console.warn("Issuing country exclusion is not set in the query result")
+          isCorrect = false
+          queryResultErrors.issuing_country.out = {
+            message: "Issuing country exclusion is not set in the query result",
+          }
+        }
+        // Check the countryList is in ascending order
+        // If the prover doesn't use a sorted list then the proof cannot be trusted
+        // as it is requirement in the circuit for the exclusion check to work
+        for (let i = 1; i < countryList.length; i++) {
+          if (countryList[i] < countryList[i - 1]) {
+            console.warn(
+              "The issuing country exclusion list has not been sorted, and thus the proof cannot be trusted",
+            )
+            isCorrect = false
+            queryResultErrors.issuing_country.out = {
+              message:
+                "The issuing country exclusion list has not been sorted, and thus the proof cannot be trusted",
+            }
+          }
+        }
+        uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
+      } else if (proof.name === "inclusion_check_nationality") {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            "Failed to check the link between the validity of the ID and the nationality inclusion check",
+          )
+          isCorrect = false
+          queryResultErrors.nationality.commitment = {
+            expected: `Commitment: ${commitmentOut}`,
+            received: `Commitment: ${commitmentIn}`,
+            message:
+              "Failed to check the link between the validity of the ID and the nationality inclusion check",
           }
         }
         const countryList = getCountryListFromInclusionProof(proofData)
@@ -1547,12 +1608,12 @@ export class ZKPassport {
           if (
             !queryResult.nationality.in.expected?.every((country) => countryList.includes(country))
           ) {
-            console.warn("Country inclusion list does not match the one from the query results")
+            console.warn("Nationality inclusion list does not match the one from the query results")
             isCorrect = false
             queryResultErrors.nationality.in = {
               expected: queryResult.nationality.in.expected,
               received: countryList,
-              message: "Country inclusion list does not match the one from the query results",
+              message: "Nationality inclusion list does not match the one from the query results",
             }
           }
         } else if (!queryResult.nationality || !queryResult.nationality.in) {
@@ -1560,6 +1621,50 @@ export class ZKPassport {
           isCorrect = false
           queryResultErrors.nationality.in = {
             message: "Nationality inclusion is not set in the query result",
+          }
+        }
+        uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
+      } else if (proof.name === "inclusion_check_issuing_country") {
+        commitmentIn = getCommitmentInFromDisclosureProof(proofData)
+        if (commitmentIn !== commitmentOut) {
+          console.warn(
+            "Failed to check the link between the validity of the ID and the issuing country inclusion check",
+          )
+          isCorrect = false
+          queryResultErrors.nationality.commitment = {
+            expected: `Commitment: ${commitmentOut}`,
+            received: `Commitment: ${commitmentIn}`,
+            message:
+              "Failed to check the link between the validity of the ID and the issuing country inclusion check",
+          }
+        }
+        const countryList = getCountryListFromInclusionProof(proofData)
+        if (
+          queryResult.issuing_country &&
+          queryResult.issuing_country.in &&
+          queryResult.issuing_country.in.result
+        ) {
+          if (
+            !queryResult.issuing_country.in.expected?.every((country) =>
+              countryList.includes(country),
+            )
+          ) {
+            console.warn(
+              "Issuing country inclusion list does not match the one from the query results",
+            )
+            isCorrect = false
+            queryResultErrors.issuing_country.in = {
+              expected: queryResult.issuing_country.in.expected,
+              received: countryList,
+              message:
+                "Issuing country inclusion list does not match the one from the query results",
+            }
+          }
+        } else if (!queryResult.issuing_country || !queryResult.issuing_country.in) {
+          console.warn("Issuing country inclusion is not set in the query result")
+          isCorrect = false
+          queryResultErrors.issuing_country.in = {
+            message: "Issuing country inclusion is not set in the query result",
           }
         }
         uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
