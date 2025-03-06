@@ -189,6 +189,9 @@ bun install
 
 ```sh
 bun test
+
+# With logging
+DEBUG=zkpassport:* bun run test
 ```
 
 ### Simulate Websocket Messages
