@@ -1721,6 +1721,19 @@ export class ZKPassport {
     verified: boolean
     queryResultErrors?: QueryResultErrors
   }> {
+    const formattedResult: QueryResult = queryResult
+    // Make sure to reconvert the dates to Date objects
+    if (formattedResult.birthdate && formattedResult.birthdate.disclose) {
+      formattedResult.birthdate.disclose.result = new Date(
+        formattedResult.birthdate.disclose.result,
+      )
+    }
+    if (formattedResult.expiry_date && formattedResult.expiry_date.disclose) {
+      formattedResult.expiry_date.disclose.result = new Date(
+        formattedResult.expiry_date.disclose.result,
+      )
+    }
+
     const { BarretenbergVerifier } = await import("@aztec/bb.js")
     const verifier = new BarretenbergVerifier()
     let verified = true
@@ -1730,7 +1743,7 @@ export class ZKPassport {
       isCorrect,
       uniqueIdentifier: uniqueIdentifierFromPublicInputs,
       queryResultErrors: queryResultErrorsFromPublicInputs,
-    } = await this.checkPublicInputs(proofs, queryResult, validity)
+    } = await this.checkPublicInputs(proofs, formattedResult, validity)
     uniqueIdentifier = uniqueIdentifierFromPublicInputs
     verified = isCorrect
     queryResultErrors = isCorrect ? undefined : queryResultErrorsFromPublicInputs
