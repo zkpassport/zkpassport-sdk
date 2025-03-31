@@ -31,6 +31,7 @@ import {
   formatName,
   getHostedPackagedCircuitByName,
   Query,
+  getNumberOfPublicInputs,
 } from "@zkpassport/utils"
 import { bytesToHex } from "@noble/ciphers/utils"
 import { getWebSocketClient, WebSocketClient } from "./websocket"
@@ -796,7 +797,7 @@ export class ZKPassport {
     })
 
     for (const proof of sortedProofs!) {
-      const proofData = getProofData(proof.proof as string, true)
+      const proofData = getProofData(proof.proof as string, getNumberOfPublicInputs(proof.name!))
       if (proof.name?.startsWith("sig_check_dsc")) {
         commitmentOut = getCommitmentFromDSCProof(proofData)
         const merkleRoot = getMerkleRootFromDSCProof(proofData)
@@ -1752,7 +1753,7 @@ export class ZKPassport {
     // Only proceed with the proof verification if the public inputs are correct
     if (verified) {
       for (const proof of proofs) {
-        const proofData = getProofData(proof.proof as string, true)
+        const proofData = getProofData(proof.proof as string, getNumberOfPublicInputs(proof.name!))
         const hostedPackagedCircuit = await getHostedPackagedCircuitByName(
           proof.version as any,
           proof.name!,
