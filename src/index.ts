@@ -42,7 +42,6 @@ import {
   CountryCommittedInputs,
   getMinDateFromCommittedInputs,
   getMaxDateFromCommittedInputs,
-  getCountryListFromCommittedInputs,
   getCurrentDateFromOuterProof,
   getNullifierFromOuterProof,
 } from "@zkpassport/utils"
@@ -757,7 +756,24 @@ export class ZKPassport {
   }
 
   private checkDiscloseBytesPublicInputs(proof: ProofResult, queryResult: QueryResult) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
     // We can't be certain that the disclosed data is for a passport or an ID card
     // so we need to check both (unless the document type is revealed)
@@ -1101,7 +1117,24 @@ export class ZKPassport {
   }
 
   private checkAgePublicInputs(proof: ProofResult, queryResult: QueryResult) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
     const currentTime = new Date()
     const today = new Date(
@@ -1217,7 +1250,24 @@ export class ZKPassport {
   }
 
   private checkBirthdatePublicInputs(proof: ProofResult, queryResult: QueryResult) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
     const currentTime = new Date()
     const today = new Date(
@@ -1328,7 +1378,24 @@ export class ZKPassport {
   }
 
   private checkExpiryDatePublicInputs(proof: ProofResult, queryResult: QueryResult) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
     const currentTime = new Date()
     const today = new Date(
@@ -1439,7 +1506,24 @@ export class ZKPassport {
   }
 
   private checkNationalityExclusionPublicInputs(queryResult: QueryResult, countryList: string[]) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
     if (
       queryResult.nationality &&
@@ -1486,7 +1570,24 @@ export class ZKPassport {
     queryResult: QueryResult,
     countryList: string[],
   ) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
 
     if (
@@ -1531,7 +1632,24 @@ export class ZKPassport {
   }
 
   private checkNationalityInclusionPublicInputs(queryResult: QueryResult, countryList: string[]) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
     if (
       queryResult.nationality &&
@@ -1561,7 +1679,24 @@ export class ZKPassport {
     queryResult: QueryResult,
     countryList: string[],
   ) {
-    const queryResultErrors: QueryResultErrors = {} as any
+    const queryResultErrors: QueryResultErrors = {
+      sig_check_dsc: {},
+      sig_check_id_data: {},
+      data_check_integrity: {},
+      disclose: {},
+      age: {},
+      birthdate: {},
+      expiry_date: {},
+      document_type: {},
+      issuing_country: {},
+      gender: {},
+      nationality: {},
+      firstname: {},
+      lastname: {},
+      fullname: {},
+      document_number: {},
+      outer: {},
+    }
     let isCorrect = true
 
     if (
@@ -1805,9 +1940,7 @@ export class ZKPassport {
               message: "This proof does not verify the inclusion of the nationality",
             }
           }
-          const countryList = getCountryListFromCommittedInputs(
-            proof.committedInputs?.inclusion_check_nationality as CountryCommittedInputs,
-          )
+          const countryList = inclusionCheckNationalityCommittedInputs.countries
           const {
             isCorrect: isCorrectNationalityInclusion,
             queryResultErrors: queryResultErrorsNationalityInclusion,
@@ -1833,9 +1966,7 @@ export class ZKPassport {
               message: "This proof does not verify the inclusion of the issuing country",
             }
           }
-          const countryList = getCountryListFromCommittedInputs(
-            proof.committedInputs?.inclusion_check_issuing_country as CountryCommittedInputs,
-          )
+          const countryList = inclusionCheckIssuingCountryCommittedInputs.countries
           const {
             isCorrect: isCorrectIssuingCountryInclusion,
             queryResultErrors: queryResultErrorsIssuingCountryInclusion,
@@ -1860,9 +1991,7 @@ export class ZKPassport {
               message: "This proof does not verify the exclusion of the nationality",
             }
           }
-          const countryList = getCountryListFromCommittedInputs(
-            proof.committedInputs?.exclusion_check_nationality as CountryCommittedInputs,
-          )
+          const countryList = exclusionCheckNationalityCommittedInputs.countries
           const {
             isCorrect: isCorrectNationalityExclusion,
             queryResultErrors: queryResultErrorsNationalityExclusion,
@@ -1888,9 +2017,7 @@ export class ZKPassport {
               message: "This proof does not verify the exclusion of the issuing country",
             }
           }
-          const countryList = getCountryListFromCommittedInputs(
-            proof.committedInputs?.exclusion_check_issuing_country as CountryCommittedInputs,
-          )
+          const countryList = exclusionCheckIssuingCountryCommittedInputs.countries
           const {
             isCorrect: isCorrectIssuingCountryExclusion,
             queryResultErrors: queryResultErrorsIssuingCountryExclusion,
@@ -2130,9 +2257,9 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the nationality exclusion check",
           }
         }
-        const countryList = getCountryListFromCommittedInputs(
-          proof.committedInputs?.exclusion_check_nationality as CountryCommittedInputs,
-        )
+        const countryList = (
+          proof.committedInputs?.exclusion_check_nationality as CountryCommittedInputs
+        ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
         const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
         if (paramCommittment !== calculatedParamCommitment) {
@@ -2172,9 +2299,9 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the issuing country exclusion check",
           }
         }
-        const countryList = getCountryListFromCommittedInputs(
-          proof.committedInputs?.exclusion_check_issuing_country as CountryCommittedInputs,
-        )
+        const countryList = (
+          proof.committedInputs?.exclusion_check_issuing_country as CountryCommittedInputs
+        ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
         const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
         if (paramCommittment !== calculatedParamCommitment) {
@@ -2213,9 +2340,9 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the nationality inclusion check",
           }
         }
-        const countryList = getCountryListFromCommittedInputs(
-          proof.committedInputs?.inclusion_check_nationality as CountryCommittedInputs,
-        )
+        const countryList = (
+          proof.committedInputs?.inclusion_check_nationality as CountryCommittedInputs
+        ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
         const calculatedParamCommitment = await getCountryParameterCommitment(countryList, false)
         if (paramCommittment !== calculatedParamCommitment) {
@@ -2254,9 +2381,9 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the issuing country inclusion check",
           }
         }
-        const countryList = getCountryListFromCommittedInputs(
-          proof.committedInputs?.inclusion_check_issuing_country as CountryCommittedInputs,
-        )
+        const countryList = (
+          proof.committedInputs?.inclusion_check_issuing_country as CountryCommittedInputs
+        ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
         const calculatedParamCommitment = await getCountryParameterCommitment(countryList, false)
         if (paramCommittment !== calculatedParamCommitment) {
