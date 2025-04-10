@@ -25,13 +25,18 @@ import {
   getCurrentDateFromAgeProof,
   getMinDateFromProof,
   getMaxDateFromProof,
-  getCountryListFromExclusionProof,
-  getCountryListFromInclusionProof,
+  getCountryListFromCountryProof,
   DisclosedData,
   formatName,
   getHostedPackagedCircuitByName,
   Query,
   getNumberOfPublicInputs,
+  getParameterCommitmentFromDisclosureProof,
+  getCountryParameterCommitment,
+  getCurrentDateFromDateProof,
+  getDiscloseParameterCommitment,
+  getDateParameterCommitment,
+  getFormattedDate,
 } from "@zkpassport/utils"
 import { bytesToHex } from "@noble/ciphers/utils"
 import { getWebSocketClient, WebSocketClient } from "./websocket"
@@ -297,6 +302,7 @@ export class ZKPassport {
     string,
     {
       validity: number
+      mode: "fast" | "compressed"
     }
   > = {}
   private topicToKeyPair: Record<string, { privateKey: Uint8Array; publicKey: Uint8Array }> = {}
@@ -368,6 +374,11 @@ export class ZKPassport {
   }
 
   private setExpectedProofCount(topic: string) {
+    // If the mode is not fast, we'll receive only 1 compressed proof
+    if (this.topicToLocalConfig[topic].mode !== "fast") {
+      this.topicToExpectedProofCount[topic] = 1
+      return
+    }
     const fields = Object.keys(this.topicToConfig[topic] as Query).filter((key) =>
       hasRequestedAccessToField(this.topicToConfig[topic] as Query, key as IDCredential),
     )
@@ -465,6 +476,7 @@ export class ZKPassport {
         vkeyHash: request.params.vkeyHash,
         name: request.params.name,
         version: request.params.version,
+        committedInputs: request.params.committedInputs,
       }
       this.topicToProofs[topic].push(processedProof)
       await Promise.all(
@@ -586,7 +598,7 @@ export class ZKPassport {
         const pubkey = bytesToHex(this.topicToKeyPair[topic].publicKey)
         this.setExpectedProofCount(topic)
         return {
-          url: `https://zkpassport.id/r?d=${this.domain}&t=${topic}&c=${base64Config}&s=${base64Service}&p=${pubkey}`,
+          url: `https://zkpassport.id/r?d=${this.domain}&t=${topic}&c=${base64Config}&s=${base64Service}&p=${pubkey}&m=${this.topicToLocalConfig[topic].mode}`,
           requestId: topic,
           onRequestReceived: (callback: () => void) =>
             this.onRequestReceivedCallbacks[topic].push(callback),
@@ -628,6 +640,7 @@ export class ZKPassport {
     logo,
     purpose,
     scope,
+    mode,
     validity,
     topicOverride,
     keyPairOverride,
@@ -636,6 +649,7 @@ export class ZKPassport {
     logo: string
     purpose: string
     scope?: string
+    mode?: "fast" | "compressed"
     validity?: number
     topicOverride?: string
     keyPairOverride?: { privateKey: Uint8Array; publicKey: Uint8Array }
@@ -655,6 +669,7 @@ export class ZKPassport {
     this.topicToLocalConfig[topic] = {
       // Default to 6 months
       validity: validity || 6 * 30,
+      mode: mode || "fast",
     }
 
     this.onRequestReceivedCallbacks[topic] = []
@@ -870,8 +885,28 @@ export class ZKPassport {
         }
         // We can't be certain that the disclosed data is for a passport or an ID card
         // so we need to check both (unless the document type is revealed)
-        const disclosedDataPassport = DisclosedData.fromBytesProof(proofData, "passport")
-        const disclosedDataIDCard = DisclosedData.fromBytesProof(proofData, "id_card")
+        const disclosedDataPassport = DisclosedData.fromDisclosedBytes(
+          proof.committedInputs?.disclosedBytes!,
+          "passport",
+        )
+        const disclosedDataIDCard = DisclosedData.fromDisclosedBytes(
+          proof.committedInputs?.disclosedBytes!,
+          "id_card",
+        )
+        const paramCommitment = getParameterCommitmentFromDisclosureProof(proofData)
+        const calculatedParamCommitment = await getDiscloseParameterCommitment(
+          proof.committedInputs?.discloseMask!,
+          proof.committedInputs?.disclosedBytes!,
+        )
+        if (paramCommitment !== calculatedParamCommitment) {
+          console.warn("The disclosed data does not match the data committed by the proof")
+          isCorrect = false
+          queryResultErrors.disclose.commitment = {
+            expected: `Commitment: ${calculatedParamCommitment}`,
+            received: `Commitment: ${paramCommitment}`,
+            message: "The disclosed data does not match the data committed by the proof",
+          }
+        }
         if (queryResult.document_type) {
           // Document type is always at the same index in the disclosed data
           if (
@@ -1223,8 +1258,8 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the age derived from it",
           }
         }
-        const minAge = getMinAgeFromProof(proofData)
-        const maxAge = getMaxAgeFromProof(proofData)
+        const minAge = getMinAgeFromProof(proof)
+        const maxAge = getMaxAgeFromProof(proof)
         if (queryResult.age) {
           if (
             queryResult.age.gte &&
@@ -1305,7 +1340,7 @@ export class ZKPassport {
             message: "Age is not set in the query result",
           }
         }
-        const currentDate = getCurrentDateFromAgeProof(proofData)
+        const currentDate = getCurrentDateFromAgeProof(proof)
         if (
           currentDate.getTime() !== today.getTime() &&
           currentDate.getTime() !== today.getTime() - 86400000
@@ -1333,8 +1368,27 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the birthdate derived from it",
           }
         }
-        const minDate = getMinDateFromProof(proofData)
-        const maxDate = getMaxDateFromProof(proofData)
+        const minDate = getMinDateFromProof(proof)
+        const maxDate = getMaxDateFromProof(proof)
+        const currentDate = getCurrentDateFromAgeProof(proof)
+        const paramCommitment = getParameterCommitmentFromDisclosureProof(proofData)
+        const calculatedParamCommitment = await getDateParameterCommitment(
+          getFormattedDate(currentDate),
+          getFormattedDate(minDate),
+          getFormattedDate(maxDate),
+        )
+        if (paramCommitment !== calculatedParamCommitment) {
+          console.warn(
+            "The conditions for the birthdate check do not match the conditions checked by the proof",
+          )
+          isCorrect = false
+          queryResultErrors.birthdate.commitment = {
+            expected: `Commitment: ${calculatedParamCommitment}`,
+            received: `Commitment: ${paramCommitment}`,
+            message:
+              "The conditions for the birthdate check do not match the conditions checked by the proof",
+          }
+        }
         if (queryResult.birthdate) {
           if (
             queryResult.birthdate.gte &&
@@ -1410,6 +1464,18 @@ export class ZKPassport {
             message: "Birthdate is not set in the query result",
           }
         }
+        if (
+          currentDate.getTime() !== today.getTime() &&
+          currentDate.getTime() !== today.getTime() - 86400000
+        ) {
+          console.warn("Current date in the proof is too old")
+          isCorrect = false
+          queryResultErrors.age.disclose = {
+            expected: `${today.toISOString()}`,
+            received: `${currentDate.toISOString()}`,
+            message: "Current date in the proof is too old",
+          }
+        }
         uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
       } else if (proof.name === "compare_expiry") {
         commitmentIn = getCommitmentInFromDisclosureProof(proofData)
@@ -1424,8 +1490,27 @@ export class ZKPassport {
             message: "Failed to check the link between the validity of the ID and its expiry date",
           }
         }
-        const minDate = getMinDateFromProof(proofData)
-        const maxDate = getMaxDateFromProof(proofData)
+        const minDate = getMinDateFromProof(proof)
+        const maxDate = getMaxDateFromProof(proof)
+        const currentDate = getCurrentDateFromDateProof(proof)
+        const paramCommitment = getParameterCommitmentFromDisclosureProof(proofData)
+        const calculatedParamCommitment = await getDateParameterCommitment(
+          getFormattedDate(currentDate),
+          getFormattedDate(minDate),
+          getFormattedDate(maxDate),
+        )
+        if (paramCommitment !== calculatedParamCommitment) {
+          console.warn(
+            "The conditions for the expiry date check do not match the conditions checked by the proof",
+          )
+          isCorrect = false
+          queryResultErrors.expiry_date.commitment = {
+            expected: `Commitment: ${calculatedParamCommitment}`,
+            received: `Commitment: ${paramCommitment}`,
+            message:
+              "The conditions for the expiry date check do not match the conditions checked by the proof",
+          }
+        }
         if (queryResult.expiry_date) {
           if (
             queryResult.expiry_date.gte &&
@@ -1501,6 +1586,18 @@ export class ZKPassport {
             message: "Expiry date is not set in the query result",
           }
         }
+        if (
+          currentDate.getTime() !== today.getTime() &&
+          currentDate.getTime() !== today.getTime() - 86400000
+        ) {
+          console.warn("Current date in the proof is too old")
+          isCorrect = false
+          queryResultErrors.age.disclose = {
+            expected: `${today.toISOString()}`,
+            received: `${currentDate.toISOString()}`,
+            message: "Current date in the proof is too old",
+          }
+        }
         uniqueIdentifier = getNullifierFromDisclosureProof(proofData).toString(10)
       } else if (proof.name === "exclusion_check_nationality") {
         commitmentIn = getCommitmentInFromDisclosureProof(proofData)
@@ -1516,7 +1613,22 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the nationality exclusion check",
           }
         }
-        const countryList = getCountryListFromExclusionProof(proofData)
+        const countryList = getCountryListFromCountryProof(proof)
+        const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
+        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
+        if (paramCommittment !== calculatedParamCommitment) {
+          console.warn(
+            "The committed country list for the exclusion check does not match the one from the proof",
+          )
+          isCorrect = false
+          queryResultErrors.nationality.commitment = {
+            expected: `Commitment: ${calculatedParamCommitment}`,
+            received: `Commitment: ${paramCommittment}`,
+            message:
+              "The committed country list for the exclusion check does not match the one from the proof",
+          }
+        }
+
         if (
           queryResult.nationality &&
           queryResult.nationality.out &&
@@ -1570,7 +1682,22 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the issuing country exclusion check",
           }
         }
-        const countryList = getCountryListFromExclusionProof(proofData)
+        const countryList = getCountryListFromCountryProof(proof)
+        const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
+        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
+        if (paramCommittment !== calculatedParamCommitment) {
+          console.warn(
+            "The committed country list for the issuing country exclusion check does not match the one from the proof",
+          )
+          isCorrect = false
+          queryResultErrors.issuing_country.commitment = {
+            expected: `Commitment: ${calculatedParamCommitment}`,
+            received: `Commitment: ${paramCommittment}`,
+            message:
+              "The committed country list for the issuing country exclusion check does not match the one from the proof",
+          }
+        }
+
         if (
           queryResult.issuing_country &&
           queryResult.issuing_country.out &&
@@ -1629,7 +1756,22 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the nationality inclusion check",
           }
         }
-        const countryList = getCountryListFromInclusionProof(proofData)
+        const countryList = getCountryListFromCountryProof(proof)
+        const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
+        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
+        if (paramCommittment !== calculatedParamCommitment) {
+          console.warn(
+            "The committed country list for the nationality inclusion check does not match the one from the proof",
+          )
+          isCorrect = false
+          queryResultErrors.nationality.commitment = {
+            expected: `Commitment: ${calculatedParamCommitment}`,
+            received: `Commitment: ${paramCommittment}`,
+            message:
+              "The committed country list for the nationality inclusion check does not match the one from the proof",
+          }
+        }
+
         if (
           queryResult.nationality &&
           queryResult.nationality.in &&
@@ -1668,7 +1810,22 @@ export class ZKPassport {
               "Failed to check the link between the validity of the ID and the issuing country inclusion check",
           }
         }
-        const countryList = getCountryListFromInclusionProof(proofData)
+        const countryList = getCountryListFromCountryProof(proof)
+        const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
+        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
+        if (paramCommittment !== calculatedParamCommitment) {
+          console.warn(
+            "The committed country list for the issuing country inclusion check does not match the one from the proof",
+          )
+          isCorrect = false
+          queryResultErrors.issuing_country.commitment = {
+            expected: `Commitment: ${calculatedParamCommitment}`,
+            received: `Commitment: ${paramCommittment}`,
+            message:
+              "The committed country list for the issuing country inclusion check does not match the one from the proof",
+          }
+        }
+
         if (
           queryResult.issuing_country &&
           queryResult.issuing_country.in &&
@@ -1760,7 +1917,13 @@ export class ZKPassport {
         )
         const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, "base64")
         try {
-          verified = await verifier.verifyUltraHonkProof(proofData, new Uint8Array(vkeyBytes))
+          verified = await verifier.verifyUltraHonkProof(
+            {
+              proof: Buffer.from(proofData.proof.join(""), "hex"),
+              publicInputs: proofData.publicInputs,
+            },
+            new Uint8Array(vkeyBytes),
+          )
         } catch (e) {
           console.warn("Error verifying proof", e)
           verified = false
@@ -1790,7 +1953,7 @@ export class ZKPassport {
     const base64Service = Buffer.from(JSON.stringify(this.topicToService[requestId])).toString(
       "base64",
     )
-    return `https://zkpassport.id/r?d=${this.domain}&t=${requestId}&c=${base64Config}&s=${base64Service}&p=${pubkey}`
+    return `https://zkpassport.id/r?d=${this.domain}&t=${requestId}&c=${base64Config}&s=${base64Service}&p=${pubkey}&m=${this.topicToLocalConfig[requestId].mode}`
   }
 
   /**
