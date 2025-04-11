@@ -1982,7 +1982,7 @@ export class ZKPassport {
           const exclusionCheckNationalityParameterCommitment = await getCountryParameterCommitment(
             exclusionCheckNationalityCommittedInputs.countries,
           )
-          if (paramCommitments.includes(exclusionCheckNationalityParameterCommitment)) {
+          if (!paramCommitments.includes(exclusionCheckNationalityParameterCommitment)) {
             console.warn("This proof does not verify the exclusion of the nationality")
             isCorrect = false
             queryResultErrors.nationality.commitment = {
@@ -2008,7 +2008,7 @@ export class ZKPassport {
             await getCountryParameterCommitment(
               exclusionCheckIssuingCountryCommittedInputs.countries,
             )
-          if (paramCommitments.includes(exclusionCheckIssuingCountryParameterCommitment)) {
+          if (!paramCommitments.includes(exclusionCheckIssuingCountryParameterCommitment)) {
             console.warn("This proof does not verify the exclusion of the issuing country")
             isCorrect = false
             queryResultErrors.issuing_country.commitment = {
