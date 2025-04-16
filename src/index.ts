@@ -44,6 +44,13 @@ import {
   getMaxDateFromCommittedInputs,
   getCurrentDateFromOuterProof,
   getNullifierFromOuterProof,
+  DisclosureCircuitName,
+  getAgeEVMParameterCommitment,
+  getDateEVMParameterCommitment,
+  getDiscloseEVMParameterCommitment,
+  getCountryEVMParameterCommitment,
+  rightPadArrayWithZeros,
+  getCommittedInputCount,
 } from "@zkpassport/utils"
 import { bytesToHex } from "@noble/ciphers/utils"
 import { getWebSocketClient, WebSocketClient } from "./websocket"
@@ -53,6 +60,8 @@ import { noLogger as logger } from "./logger"
 import { inflate } from "pako"
 import i18en from "i18n-iso-countries/langs/en.json"
 import { Buffer } from "buffer/"
+import { sha256 } from "@noble/hashes/sha256"
+import { hexToBytes } from "@noble/hashes/utils"
 
 const DEFAULT_DATE_VALUE = new Date(1111, 10, 11)
 
@@ -90,6 +99,15 @@ export type QueryResultErrors = {
     date?: QueryResultError<string>
     certificate?: QueryResultError<string>
   }
+}
+
+export type SolidityVerifierParameters = {
+  vkeyHash: string
+  proof: string
+  publicInputs: string[]
+  committedInputs: string
+  committedInputCounts: number[]
+  validityPeriodInDays: number
 }
 
 registerLocale(i18en)
@@ -1794,6 +1812,7 @@ export class ZKPassport {
     for (const proof of sortedProofs!) {
       const proofData = getProofData(proof.proof as string, getNumberOfPublicInputs(proof.name!))
       if (proof.name?.startsWith("outer")) {
+        const isForEVM = proof.name?.startsWith("outer_evm")
         const certificateRegistryRoot = getCertificateRegistryRootFromOuterProof(proofData)
         if (!VALID_CERTIFICATE_REGISTRY_ROOT.includes(certificateRegistryRoot)) {
           console.warn("The ID was signed by an unrecognized root certificate")
@@ -1836,11 +1855,17 @@ export class ZKPassport {
         }
         if (!!committedInputs?.compare_age) {
           const ageCommittedInputs = committedInputs?.compare_age as AgeCommittedInputs
-          const ageParameterCommitment = await getAgeParameterCommitment(
-            ageCommittedInputs.currentDate,
-            ageCommittedInputs.minAge,
-            ageCommittedInputs.maxAge,
-          )
+          const ageParameterCommitment = isForEVM
+            ? await getAgeEVMParameterCommitment(
+                ageCommittedInputs.currentDate,
+                ageCommittedInputs.minAge,
+                ageCommittedInputs.maxAge,
+              )
+            : await getAgeParameterCommitment(
+                ageCommittedInputs.currentDate,
+                ageCommittedInputs.minAge,
+                ageCommittedInputs.maxAge,
+              )
           if (!paramCommitments.includes(ageParameterCommitment)) {
             console.warn("This proof does not verify the age")
             isCorrect = false
@@ -1859,11 +1884,17 @@ export class ZKPassport {
           }
         } else if (!!committedInputs?.compare_birthdate) {
           const birthdateCommittedInputs = committedInputs?.compare_birthdate as DateCommittedInputs
-          const birthdateParameterCommitment = await getDateParameterCommitment(
-            birthdateCommittedInputs.currentDate,
-            birthdateCommittedInputs.minDate,
-            birthdateCommittedInputs.maxDate,
-          )
+          const birthdateParameterCommitment = isForEVM
+            ? await getDateEVMParameterCommitment(
+                birthdateCommittedInputs.currentDate,
+                birthdateCommittedInputs.minDate,
+                birthdateCommittedInputs.maxDate,
+              )
+            : await getDateParameterCommitment(
+                birthdateCommittedInputs.currentDate,
+                birthdateCommittedInputs.minDate,
+                birthdateCommittedInputs.maxDate,
+              )
           if (!paramCommitments.includes(birthdateParameterCommitment)) {
             console.warn("This proof does not verify the birthdate")
             isCorrect = false
@@ -1882,11 +1913,17 @@ export class ZKPassport {
           }
         } else if (!!committedInputs?.compare_expiry) {
           const expiryCommittedInputs = committedInputs?.compare_expiry as DateCommittedInputs
-          const expiryParameterCommitment = await getDateParameterCommitment(
-            expiryCommittedInputs.currentDate,
-            expiryCommittedInputs.minDate,
-            expiryCommittedInputs.maxDate,
-          )
+          const expiryParameterCommitment = isForEVM
+            ? await getDateEVMParameterCommitment(
+                expiryCommittedInputs.currentDate,
+                expiryCommittedInputs.minDate,
+                expiryCommittedInputs.maxDate,
+              )
+            : await getDateParameterCommitment(
+                expiryCommittedInputs.currentDate,
+                expiryCommittedInputs.minDate,
+                expiryCommittedInputs.maxDate,
+              )
           if (!paramCommitments.includes(expiryParameterCommitment)) {
             console.warn("This proof does not verify the expiry date")
             isCorrect = false
@@ -1905,10 +1942,15 @@ export class ZKPassport {
           }
         } else if (!!committedInputs?.disclose_bytes) {
           const discloseCommittedInputs = committedInputs?.disclose_bytes as DiscloseCommittedInputs
-          const discloseParameterCommitment = await getDiscloseParameterCommitment(
-            discloseCommittedInputs.discloseMask,
-            discloseCommittedInputs.disclosedBytes,
-          )
+          const discloseParameterCommitment = isForEVM
+            ? await getDiscloseEVMParameterCommitment(
+                discloseCommittedInputs.discloseMask,
+                discloseCommittedInputs.disclosedBytes,
+              )
+            : await getDiscloseParameterCommitment(
+                discloseCommittedInputs.discloseMask,
+                discloseCommittedInputs.disclosedBytes,
+              )
           if (!paramCommitments.includes(discloseParameterCommitment)) {
             console.warn("This proof does not verify any of the data disclosed")
             isCorrect = false
@@ -1928,9 +1970,13 @@ export class ZKPassport {
         } else if (!!committedInputs?.inclusion_check_nationality) {
           const inclusionCheckNationalityCommittedInputs =
             committedInputs?.inclusion_check_nationality as CountryCommittedInputs
-          const inclusionCheckNationalityParameterCommitment = await getCountryParameterCommitment(
-            inclusionCheckNationalityCommittedInputs.countries,
-          )
+          const inclusionCheckNationalityParameterCommitment = isForEVM
+            ? await getCountryEVMParameterCommitment(
+                inclusionCheckNationalityCommittedInputs.countries,
+              )
+            : await getCountryParameterCommitment(
+                inclusionCheckNationalityCommittedInputs.countries,
+              )
           if (!paramCommitments.includes(inclusionCheckNationalityParameterCommitment)) {
             console.warn("This proof does not verify the inclusion of the nationality")
             isCorrect = false
@@ -1953,10 +1999,13 @@ export class ZKPassport {
         } else if (!!committedInputs?.inclusion_check_issuing_country) {
           const inclusionCheckIssuingCountryCommittedInputs =
             committedInputs?.inclusion_check_issuing_country as CountryCommittedInputs
-          const inclusionCheckIssuingCountryParameterCommitment =
-            await getCountryParameterCommitment(
-              inclusionCheckIssuingCountryCommittedInputs.countries,
-            )
+          const inclusionCheckIssuingCountryParameterCommitment = isForEVM
+            ? await getCountryEVMParameterCommitment(
+                inclusionCheckIssuingCountryCommittedInputs.countries,
+              )
+            : await getCountryParameterCommitment(
+                inclusionCheckIssuingCountryCommittedInputs.countries,
+              )
           if (!paramCommitments.includes(inclusionCheckIssuingCountryParameterCommitment)) {
             console.warn("This proof does not verify the inclusion of the issuing country")
             isCorrect = false
@@ -1979,9 +2028,13 @@ export class ZKPassport {
         } else if (!!committedInputs?.exclusion_check_nationality) {
           const exclusionCheckNationalityCommittedInputs =
             committedInputs?.exclusion_check_nationality as CountryCommittedInputs
-          const exclusionCheckNationalityParameterCommitment = await getCountryParameterCommitment(
-            exclusionCheckNationalityCommittedInputs.countries,
-          )
+          const exclusionCheckNationalityParameterCommitment = isForEVM
+            ? await getCountryEVMParameterCommitment(
+                exclusionCheckNationalityCommittedInputs.countries,
+              )
+            : await getCountryParameterCommitment(
+                exclusionCheckNationalityCommittedInputs.countries,
+              )
           if (!paramCommitments.includes(exclusionCheckNationalityParameterCommitment)) {
             console.warn("This proof does not verify the exclusion of the nationality")
             isCorrect = false
@@ -2004,10 +2057,13 @@ export class ZKPassport {
         } else if (!!committedInputs?.exclusion_check_issuing_country) {
           const exclusionCheckIssuingCountryCommittedInputs =
             committedInputs?.exclusion_check_issuing_country as CountryCommittedInputs
-          const exclusionCheckIssuingCountryParameterCommitment =
-            await getCountryParameterCommitment(
-              exclusionCheckIssuingCountryCommittedInputs.countries,
-            )
+          const exclusionCheckIssuingCountryParameterCommitment = isForEVM
+            ? await getCountryEVMParameterCommitment(
+                exclusionCheckIssuingCountryCommittedInputs.countries,
+              )
+            : await getCountryParameterCommitment(
+                exclusionCheckIssuingCountryCommittedInputs.countries,
+              )
           if (!paramCommitments.includes(exclusionCheckIssuingCountryParameterCommitment)) {
             console.warn("This proof does not verify the exclusion of the issuing country")
             isCorrect = false
@@ -2491,6 +2547,122 @@ export class ZKPassport {
     // If the proofs are not verified, we don't return the unique identifier
     uniqueIdentifier = verified ? uniqueIdentifier : undefined
     return { uniqueIdentifier, verified, queryResultErrors }
+  }
+
+  public getSolidityVerifierParameters(proof: ProofResult, validityPeriodInDays: number = 7) {
+    if (!proof.name?.startsWith("outer_evm")) {
+      throw new Error(
+        "This proof cannot be verified on an EVM chain. Please make sure to use the `compressed-evm` mode.",
+      )
+    }
+    const proofData = getProofData(proof.proof as string, getNumberOfPublicInputs(proof.name!))
+    // For EVM optimised proofs, the first 16 bytes of the proof are the aggregation object
+    // and should be moved at the end of the public inputs
+    const actualProof = proofData.proof.slice(16)
+    const actualPublicInputs = proofData.publicInputs.concat(proofData.proof.slice(0, 16))
+    let committedInputCounts: { circuitName: DisclosureCircuitName; count: number }[] = []
+    let committedInputs: { circuitName: DisclosureCircuitName; inputs: string }[] = []
+    for (const key in proof.committedInputs) {
+      const committedInputCount = getCommittedInputCount(key as DisclosureCircuitName)
+      const circuitName = key as DisclosureCircuitName
+      committedInputCounts.push({ circuitName, count: committedInputCount })
+      let compressedCommittedInputs = ""
+      if (
+        circuitName === "inclusion_check_issuing_country_evm" ||
+        circuitName === "inclusion_check_nationality_evm" ||
+        circuitName === "exclusion_check_issuing_country_evm" ||
+        circuitName === "exclusion_check_nationality_evm"
+      ) {
+        const value = proof.committedInputs[circuitName] as CountryCommittedInputs
+        const formattedCountries = value.countries
+        if (
+          circuitName === "exclusion_check_issuing_country_evm" ||
+          circuitName === "exclusion_check_nationality_evm"
+        ) {
+          formattedCountries.sort((a, b) => a.localeCompare(b))
+        }
+        compressedCommittedInputs = rightPadArrayWithZeros(
+          formattedCountries.map((c) => Array.from(new TextEncoder().encode(c))).flat(),
+          600,
+        )
+          .map((x) => x.toString(16).padStart(2, "0"))
+          .join("")
+      } else if (circuitName === "compare_age_evm") {
+        const value = proof.committedInputs[circuitName] as AgeCommittedInputs
+        const currentDateBytes = Array.from(new TextEncoder().encode(value.currentDate))
+        compressedCommittedInputs =
+          currentDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
+          value.minAge.toString(16).padStart(2, "0") +
+          value.maxAge.toString(16).padStart(2, "0")
+      } else if (circuitName === "compare_birthdate_evm") {
+        const value = proof.committedInputs[circuitName] as DateCommittedInputs
+        const currentDateBytes = Array.from(new TextEncoder().encode(value.currentDate))
+        const minDateBytes = Array.from(new TextEncoder().encode(value.minDate))
+        const maxDateBytes = Array.from(new TextEncoder().encode(value.maxDate))
+        compressedCommittedInputs =
+          currentDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
+          minDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
+          maxDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("")
+      } else if (circuitName === "compare_expiry_evm") {
+        const value = proof.committedInputs[circuitName] as DateCommittedInputs
+        const currentDateBytes = Array.from(new TextEncoder().encode(value.currentDate))
+        const minDateBytes = Array.from(new TextEncoder().encode(value.minDate))
+        const maxDateBytes = Array.from(new TextEncoder().encode(value.maxDate))
+        compressedCommittedInputs =
+          currentDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
+          minDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
+          maxDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("")
+      } else if (circuitName === "disclose_bytes_evm") {
+        const value = proof.committedInputs[circuitName] as DiscloseCommittedInputs
+        compressedCommittedInputs =
+          value.discloseMask.map((x) => x.toString(16).padStart(2, "0")).join("") +
+          value.disclosedBytes.map((x) => x.toString(16).padStart(2, "0")).join("")
+      } else {
+        throw new Error(`Unsupported circuit for EVM verification: ${circuitName}`)
+      }
+      committedInputs.push({ circuitName, inputs: compressedCommittedInputs })
+    }
+    const parameterCommitments = proofData.publicInputs.slice(11, proofData.publicInputs.length - 1)
+    let compressedCommittedInputs = ""
+    let committedInputCountsArray = []
+    for (const commitment of parameterCommitments) {
+      const committedInput = committedInputs.find((x) => {
+        const rawHashedInputs = sha256(hexToBytes(x.inputs))
+        // Shift the hash 8 bits to the right (1 byte)
+        // as one byte is dropped in the circuit to fit in the 254-bit field size
+        const hashedInputs = new Uint8Array(rawHashedInputs.length)
+        // Move each byte 1 position to the right (shifting 8 bits)
+        for (let i = 0; i < rawHashedInputs.length - 1; i++) {
+          hashedInputs[i + 1] = rawHashedInputs[i]
+        }
+        // First byte becomes 0 (since we're shifting right)
+        hashedInputs[0] = 0
+
+        return bytesToHex(hashedInputs) === commitment.replace("0x", "")
+      })
+      if (committedInput) {
+        const count = committedInputCounts.find(
+          (x) => x.circuitName === committedInput.circuitName,
+        )?.count
+        if (count) {
+          committedInputCountsArray.push(count)
+          compressedCommittedInputs += committedInput.inputs
+        } else {
+          throw new Error(`Unknown circuit name: ${committedInput.circuitName}`)
+        }
+      } else {
+        throw new Error(`Invalid commitment: ${commitment}`)
+      }
+    }
+    const params: SolidityVerifierParameters = {
+      vkeyHash: proof.vkeyHash!,
+      proof: actualProof.join(""),
+      publicInputs: actualPublicInputs,
+      committedInputs: compressedCommittedInputs,
+      committedInputCounts: committedInputCountsArray,
+      validityPeriodInDays,
+    }
+    return params
   }
 
   /**
