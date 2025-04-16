@@ -51,6 +51,7 @@ import {
   getCountryEVMParameterCommitment,
   rightPadArrayWithZeros,
   getCommittedInputCount,
+  ProofMode,
 } from "@zkpassport/utils"
 import { bytesToHex } from "@noble/ciphers/utils"
 import { getWebSocketClient, WebSocketClient } from "./websocket"
@@ -330,7 +331,7 @@ export class ZKPassport {
     string,
     {
       validity: number
-      mode: "fast" | "compressed"
+      mode: ProofMode
     }
   > = {}
   private topicToKeyPair: Record<string, { privateKey: Uint8Array; publicKey: Uint8Array }> = {}
@@ -677,7 +678,7 @@ export class ZKPassport {
     logo: string
     purpose: string
     scope?: string
-    mode?: "fast" | "compressed"
+    mode?: ProofMode
     validity?: number
     topicOverride?: string
     keyPairOverride?: { privateKey: Uint8Array; publicKey: Uint8Array }
@@ -2559,7 +2560,9 @@ export class ZKPassport {
     // For EVM optimised proofs, the first 16 bytes of the proof are the aggregation object
     // and should be moved at the end of the public inputs
     const actualProof = proofData.proof.slice(16)
-    const actualPublicInputs = proofData.publicInputs.concat(proofData.proof.slice(0, 16))
+    const actualPublicInputs = proofData.publicInputs.concat(
+      proofData.proof.slice(0, 16).map((x) => `0x${x}`),
+    )
     let committedInputCounts: { circuitName: DisclosureCircuitName; count: number }[] = []
     let committedInputs: { circuitName: DisclosureCircuitName; inputs: string }[] = []
     for (const key in proof.committedInputs) {
@@ -2656,9 +2659,9 @@ export class ZKPassport {
     }
     const params: SolidityVerifierParameters = {
       vkeyHash: proof.vkeyHash!,
-      proof: actualProof.join(""),
+      proof: `0x${actualProof.join("")}`,
       publicInputs: actualPublicInputs,
-      committedInputs: compressedCommittedInputs,
+      committedInputs: `0x${compressedCommittedInputs}`,
       committedInputCounts: committedInputCountsArray,
       validityPeriodInDays,
     }
