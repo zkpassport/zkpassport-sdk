@@ -2626,7 +2626,7 @@ export class ZKPassport {
   } {
     if (network === "ethereum_sepolia") {
       return {
-        address: "0xEee0e3c465615dab8Ab2dBaDE52fd2745c12872e",
+        address: "0xca644D3424c2ee577FaaF2b56C0f9D1937E8e87C",
         abi: ZKPassportVerifierAbi.abi as any,
       }
     } else if (network === "local_anvil") {
