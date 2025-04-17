@@ -52,6 +52,7 @@ import {
   rightPadArrayWithZeros,
   getCommittedInputCount,
   ProofMode,
+  ProofType,
 } from "@zkpassport/utils"
 import { bytesToHex } from "@noble/ciphers/utils"
 import { getWebSocketClient, WebSocketClient } from "./websocket"
@@ -63,6 +64,7 @@ import i18en from "i18n-iso-countries/langs/en.json"
 import { Buffer } from "buffer/"
 import { sha256 } from "@noble/hashes/sha256"
 import { hexToBytes } from "@noble/hashes/utils"
+import ZKPassportVerifierAbi from "./assets/abi/ZKPassportVerifier.json"
 
 const DEFAULT_DATE_VALUE = new Date(1111, 10, 11)
 
@@ -110,6 +112,8 @@ export type SolidityVerifierParameters = {
   committedInputCounts: number[]
   validityPeriodInDays: number
 }
+
+export type EVMChain = "ethereum_sepolia"
 
 registerLocale(i18en)
 
@@ -1887,11 +1891,13 @@ export class ZKPassport {
           const birthdateCommittedInputs = committedInputs?.compare_birthdate as DateCommittedInputs
           const birthdateParameterCommitment = isForEVM
             ? await getDateEVMParameterCommitment(
+                ProofType.BIRTHDATE,
                 birthdateCommittedInputs.currentDate,
                 birthdateCommittedInputs.minDate,
                 birthdateCommittedInputs.maxDate,
               )
             : await getDateParameterCommitment(
+                ProofType.BIRTHDATE,
                 birthdateCommittedInputs.currentDate,
                 birthdateCommittedInputs.minDate,
                 birthdateCommittedInputs.maxDate,
@@ -1916,11 +1922,13 @@ export class ZKPassport {
           const expiryCommittedInputs = committedInputs?.compare_expiry as DateCommittedInputs
           const expiryParameterCommitment = isForEVM
             ? await getDateEVMParameterCommitment(
+                ProofType.EXPIRY_DATE,
                 expiryCommittedInputs.currentDate,
                 expiryCommittedInputs.minDate,
                 expiryCommittedInputs.maxDate,
               )
             : await getDateParameterCommitment(
+                ProofType.EXPIRY_DATE,
                 expiryCommittedInputs.currentDate,
                 expiryCommittedInputs.minDate,
                 expiryCommittedInputs.maxDate,
@@ -1973,9 +1981,11 @@ export class ZKPassport {
             committedInputs?.inclusion_check_nationality as CountryCommittedInputs
           const inclusionCheckNationalityParameterCommitment = isForEVM
             ? await getCountryEVMParameterCommitment(
+                ProofType.NATIONALITY_INCLUSION,
                 inclusionCheckNationalityCommittedInputs.countries,
               )
             : await getCountryParameterCommitment(
+                ProofType.NATIONALITY_INCLUSION,
                 inclusionCheckNationalityCommittedInputs.countries,
               )
           if (!paramCommitments.includes(inclusionCheckNationalityParameterCommitment)) {
@@ -2002,9 +2012,11 @@ export class ZKPassport {
             committedInputs?.inclusion_check_issuing_country as CountryCommittedInputs
           const inclusionCheckIssuingCountryParameterCommitment = isForEVM
             ? await getCountryEVMParameterCommitment(
+                ProofType.ISSUING_COUNTRY_INCLUSION,
                 inclusionCheckIssuingCountryCommittedInputs.countries,
               )
             : await getCountryParameterCommitment(
+                ProofType.ISSUING_COUNTRY_INCLUSION,
                 inclusionCheckIssuingCountryCommittedInputs.countries,
               )
           if (!paramCommitments.includes(inclusionCheckIssuingCountryParameterCommitment)) {
@@ -2031,9 +2043,11 @@ export class ZKPassport {
             committedInputs?.exclusion_check_nationality as CountryCommittedInputs
           const exclusionCheckNationalityParameterCommitment = isForEVM
             ? await getCountryEVMParameterCommitment(
+                ProofType.NATIONALITY_EXCLUSION,
                 exclusionCheckNationalityCommittedInputs.countries,
               )
             : await getCountryParameterCommitment(
+                ProofType.NATIONALITY_EXCLUSION,
                 exclusionCheckNationalityCommittedInputs.countries,
               )
           if (!paramCommitments.includes(exclusionCheckNationalityParameterCommitment)) {
@@ -2060,9 +2074,11 @@ export class ZKPassport {
             committedInputs?.exclusion_check_issuing_country as CountryCommittedInputs
           const exclusionCheckIssuingCountryParameterCommitment = isForEVM
             ? await getCountryEVMParameterCommitment(
+                ProofType.ISSUING_COUNTRY_EXCLUSION,
                 exclusionCheckIssuingCountryCommittedInputs.countries,
               )
             : await getCountryParameterCommitment(
+                ProofType.ISSUING_COUNTRY_EXCLUSION,
                 exclusionCheckIssuingCountryCommittedInputs.countries,
               )
           if (!paramCommitments.includes(exclusionCheckIssuingCountryParameterCommitment)) {
@@ -2236,6 +2252,7 @@ export class ZKPassport {
         const paramCommitment = getParameterCommitmentFromDisclosureProof(proofData)
         const committedInputs = proof.committedInputs?.compare_birthdate as DateCommittedInputs
         const calculatedParamCommitment = await getDateParameterCommitment(
+          ProofType.BIRTHDATE,
           committedInputs.currentDate,
           committedInputs.minDate,
           committedInputs.maxDate,
@@ -2276,6 +2293,7 @@ export class ZKPassport {
         const paramCommitment = getParameterCommitmentFromDisclosureProof(proofData)
         const committedInputs = proof.committedInputs?.compare_expiry as DateCommittedInputs
         const calculatedParamCommitment = await getDateParameterCommitment(
+          ProofType.EXPIRY_DATE,
           committedInputs.currentDate,
           committedInputs.minDate,
           committedInputs.maxDate,
@@ -2318,7 +2336,11 @@ export class ZKPassport {
           proof.committedInputs?.exclusion_check_nationality as CountryCommittedInputs
         ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
-        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
+        const calculatedParamCommitment = await getCountryParameterCommitment(
+          ProofType.NATIONALITY_EXCLUSION,
+          countryList,
+          true,
+        )
         if (paramCommittment !== calculatedParamCommitment) {
           console.warn(
             "The committed country list for the exclusion check does not match the one from the proof",
@@ -2360,7 +2382,11 @@ export class ZKPassport {
           proof.committedInputs?.exclusion_check_issuing_country as CountryCommittedInputs
         ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
-        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, true)
+        const calculatedParamCommitment = await getCountryParameterCommitment(
+          ProofType.ISSUING_COUNTRY_EXCLUSION,
+          countryList,
+          true,
+        )
         if (paramCommittment !== calculatedParamCommitment) {
           console.warn(
             "The committed country list for the issuing country exclusion check does not match the one from the proof",
@@ -2401,7 +2427,11 @@ export class ZKPassport {
           proof.committedInputs?.inclusion_check_nationality as CountryCommittedInputs
         ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
-        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, false)
+        const calculatedParamCommitment = await getCountryParameterCommitment(
+          ProofType.NATIONALITY_INCLUSION,
+          countryList,
+          false,
+        )
         if (paramCommittment !== calculatedParamCommitment) {
           console.warn(
             "The committed country list for the nationality inclusion check does not match the one from the proof",
@@ -2442,7 +2472,11 @@ export class ZKPassport {
           proof.committedInputs?.inclusion_check_issuing_country as CountryCommittedInputs
         ).countries
         const paramCommittment = getParameterCommitmentFromDisclosureProof(proofData)
-        const calculatedParamCommitment = await getCountryParameterCommitment(countryList, false)
+        const calculatedParamCommitment = await getCountryParameterCommitment(
+          ProofType.ISSUING_COUNTRY_INCLUSION,
+          countryList,
+          false,
+        )
         if (paramCommittment !== calculatedParamCommitment) {
           console.warn(
             "The committed country list for the issuing country inclusion check does not match the one from the proof",
@@ -2550,6 +2584,24 @@ export class ZKPassport {
     return { uniqueIdentifier, verified, queryResultErrors }
   }
 
+  public getSolidityVerifierDetails(network: EVMChain): {
+    address: string
+    abi: {
+      type: "function" | "event" | "constructor"
+      name: string
+      inputs: { name: string; type: string; internalType: string }[]
+      outputs: { name: string; type: string; internalType: string }[]
+    }[]
+  } {
+    if (network === "ethereum_sepolia") {
+      return {
+        address: "0x0000000000000000000000000000000000000000",
+        abi: ZKPassportVerifierAbi.abi as any,
+      }
+    }
+    throw new Error(`Unsupported network: ${network}`)
+  }
+
   public getSolidityVerifierParameters(proof: ProofResult, validityPeriodInDays: number = 7) {
     if (!proof.name?.startsWith("outer_evm")) {
       throw new Error(
@@ -2584,16 +2636,31 @@ export class ZKPassport {
         ) {
           formattedCountries.sort((a, b) => a.localeCompare(b))
         }
-        compressedCommittedInputs = rightPadArrayWithZeros(
-          formattedCountries.map((c) => Array.from(new TextEncoder().encode(c))).flat(),
-          600,
-        )
-          .map((x) => x.toString(16).padStart(2, "0"))
-          .join("")
+        const proofType = (() => {
+          switch (circuitName) {
+            case "exclusion_check_issuing_country_evm":
+              return ProofType.ISSUING_COUNTRY_EXCLUSION
+            case "exclusion_check_nationality_evm":
+              return ProofType.NATIONALITY_EXCLUSION
+            case "inclusion_check_issuing_country_evm":
+              return ProofType.ISSUING_COUNTRY_INCLUSION
+            case "inclusion_check_nationality_evm":
+              return ProofType.NATIONALITY_INCLUSION
+          }
+        })()
+        compressedCommittedInputs =
+          proofType.toString(16).padStart(2, "0") +
+          rightPadArrayWithZeros(
+            formattedCountries.map((c) => Array.from(new TextEncoder().encode(c))).flat(),
+            600,
+          )
+            .map((x) => x.toString(16).padStart(2, "0"))
+            .join("")
       } else if (circuitName === "compare_age_evm") {
         const value = proof.committedInputs[circuitName] as AgeCommittedInputs
         const currentDateBytes = Array.from(new TextEncoder().encode(value.currentDate))
         compressedCommittedInputs =
+          ProofType.AGE.toString(16).padStart(2, "0") +
           currentDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
           value.minAge.toString(16).padStart(2, "0") +
           value.maxAge.toString(16).padStart(2, "0")
@@ -2603,6 +2670,7 @@ export class ZKPassport {
         const minDateBytes = Array.from(new TextEncoder().encode(value.minDate))
         const maxDateBytes = Array.from(new TextEncoder().encode(value.maxDate))
         compressedCommittedInputs =
+          ProofType.BIRTHDATE.toString(16).padStart(2, "0") +
           currentDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
           minDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
           maxDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("")
@@ -2612,12 +2680,14 @@ export class ZKPassport {
         const minDateBytes = Array.from(new TextEncoder().encode(value.minDate))
         const maxDateBytes = Array.from(new TextEncoder().encode(value.maxDate))
         compressedCommittedInputs =
+          ProofType.EXPIRY_DATE.toString(16).padStart(2, "0") +
           currentDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
           minDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("") +
           maxDateBytes.map((x) => x.toString(16).padStart(2, "0")).join("")
       } else if (circuitName === "disclose_bytes_evm") {
         const value = proof.committedInputs[circuitName] as DiscloseCommittedInputs
         compressedCommittedInputs =
+          ProofType.DISCLOSE.toString(16).padStart(2, "0") +
           value.discloseMask.map((x) => x.toString(16).padStart(2, "0")).join("") +
           value.disclosedBytes.map((x) => x.toString(16).padStart(2, "0")).join("")
       } else {
