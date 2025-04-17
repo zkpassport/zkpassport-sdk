@@ -499,7 +499,13 @@ export class ZKPassport {
       logger.debug(`User generated proof`)
       // Uncompress the proof and convert it to a hex string
       const bytesProof = Buffer.from(request.params.proof, "base64")
+      const bytesCommittedInputs = request.params.committedInputs
+        ? Buffer.from(request.params.committedInputs, "base64")
+        : null
       const uncompressedProof = inflate(bytesProof)
+      const uncompressedCommittedInputs = bytesCommittedInputs
+        ? inflate(bytesCommittedInputs)
+        : null
       // The gzip lib in the app compress the proof as ASCII
       // and since the app passes the proof as a hex string, we can
       // just decode the bytes as hex characters using the TextDecoder
@@ -509,7 +515,9 @@ export class ZKPassport {
         vkeyHash: request.params.vkeyHash,
         name: request.params.name,
         version: request.params.version,
-        committedInputs: request.params.committedInputs,
+        committedInputs: uncompressedCommittedInputs
+          ? JSON.parse(new TextDecoder().decode(uncompressedCommittedInputs))
+          : undefined,
       }
       this.topicToProofs[topic].push(processedProof)
       await Promise.all(
