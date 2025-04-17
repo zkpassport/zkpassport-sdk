@@ -113,7 +113,7 @@ export type SolidityVerifierParameters = {
   validityPeriodInDays: number
 }
 
-export type EVMChain = "ethereum_sepolia"
+export type EVMChain = "ethereum_sepolia" | "local_anvil"
 
 registerLocale(i18en)
 
@@ -2559,18 +2559,49 @@ export class ZKPassport {
           proof.version as any,
           proof.name!,
         )
-        const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, "base64")
-        try {
-          verified = await verifier.verifyUltraHonkProof(
-            {
-              proof: Buffer.from(proofData.proof.join(""), "hex"),
-              publicInputs: proofData.publicInputs,
-            },
-            new Uint8Array(vkeyBytes),
-          )
-        } catch (e) {
-          console.warn("Error verifying proof", e)
-          verified = false
+        if (proof.name?.startsWith("outer_evm")) {
+          try {
+            const { createPublicClient, http } = await import("viem")
+            const { sepolia, anvil } = await import("viem/chains")
+            const verifierDetails = this.getSolidityVerifierDetails("local_anvil")
+            const client = createPublicClient({
+              chain: anvil,
+              transport: http(),
+            })
+            const params = this.getSolidityVerifierParameters(proof)
+            const result = await client.readContract({
+              address: verifierDetails.address as `0x${string}`,
+              abi: verifierDetails.abi,
+              functionName: "verifyProof",
+              args: [
+                params.vkeyHash,
+                params.proof,
+                params.publicInputs,
+                params.committedInputs,
+                params.committedInputCounts,
+                params.validityPeriodInDays,
+              ],
+            })
+            const isVerified = Array.isArray(result) ? Boolean(result[0]) : false
+            verified = isVerified
+          } catch (error) {
+            console.warn("Error verifying proof", error)
+            verified = false
+          }
+        } else {
+          const vkeyBytes = Buffer.from(hostedPackagedCircuit.vkey, "base64")
+          try {
+            verified = await verifier.verifyUltraHonkProof(
+              {
+                proof: Buffer.from(proofData.proof.join(""), "hex"),
+                publicInputs: proofData.publicInputs,
+              },
+              new Uint8Array(vkeyBytes),
+            )
+          } catch (e) {
+            console.warn("Error verifying proof", e)
+            verified = false
+          }
         }
         if (!verified) {
           // Break the loop if the proof is not valid
@@ -2596,6 +2627,11 @@ export class ZKPassport {
     if (network === "ethereum_sepolia") {
       return {
         address: "0x0000000000000000000000000000000000000000",
+        abi: ZKPassportVerifierAbi.abi as any,
+      }
+    } else if (network === "local_anvil") {
+      return {
+        address: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
         abi: ZKPassportVerifierAbi.abi as any,
       }
     }
