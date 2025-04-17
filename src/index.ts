@@ -2566,7 +2566,7 @@ export class ZKPassport {
             const verifierDetails = this.getSolidityVerifierDetails("ethereum_sepolia")
             const client = createPublicClient({
               chain: sepolia,
-              transport: http(),
+              transport: http("https://ethereum-sepolia-rpc.publicnode.com"),
             })
             const params = this.getSolidityVerifierParameters(proof)
             const result = await client.readContract({
@@ -2764,7 +2764,8 @@ export class ZKPassport {
       }
     }
     const params: SolidityVerifierParameters = {
-      vkeyHash: proof.vkeyHash!,
+      // Make sure the vkeyHash is 32 bytes
+      vkeyHash: `0x${proof.vkeyHash!.replace("0x", "").padStart(64, "0")}`,
       proof: `0x${actualProof.join("")}`,
       publicInputs: actualPublicInputs,
       committedInputs: `0x${compressedCommittedInputs}`,
