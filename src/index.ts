@@ -2562,10 +2562,10 @@ export class ZKPassport {
         if (proof.name?.startsWith("outer_evm")) {
           try {
             const { createPublicClient, http } = await import("viem")
-            const { sepolia, anvil } = await import("viem/chains")
-            const verifierDetails = this.getSolidityVerifierDetails("local_anvil")
+            const { sepolia } = await import("viem/chains")
+            const verifierDetails = this.getSolidityVerifierDetails("ethereum_sepolia")
             const client = createPublicClient({
-              chain: anvil,
+              chain: sepolia,
               transport: http(),
             })
             const params = this.getSolidityVerifierParameters(proof)
@@ -2626,12 +2626,12 @@ export class ZKPassport {
   } {
     if (network === "ethereum_sepolia") {
       return {
-        address: "0x0000000000000000000000000000000000000000",
+        address: "0xEee0e3c465615dab8Ab2dBaDE52fd2745c12872e",
         abi: ZKPassportVerifierAbi.abi as any,
       }
     } else if (network === "local_anvil") {
       return {
-        address: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+        address: "0x0",
         abi: ZKPassportVerifierAbi.abi as any,
       }
     }
