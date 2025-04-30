@@ -119,6 +119,7 @@ export type SolidityVerifierParameters = {
   validityPeriodInDays: number
   scope: string
   subscope: string
+  devMode: boolean
 }
 
 export type EVMChain = "ethereum_sepolia" | "local_anvil"
@@ -347,6 +348,7 @@ export class ZKPassport {
     {
       validity: number
       mode: ProofMode
+      devMode: boolean
     }
   > = {}
   private topicToKeyPair: Record<string, { privateKey: Uint8Array; publicKey: Uint8Array }> = {}
@@ -398,6 +400,7 @@ export class ZKPassport {
       queryResult: result,
       validity: this.topicToLocalConfig[topic]?.validity,
       scope: this.topicToService[topic]?.scope,
+      devMode: this.topicToLocalConfig[topic]?.devMode,
     })
     delete this.topicToProofs[topic]
     const hasFailedProofs = this.topicToFailedProofCount[topic] > 0
@@ -686,6 +689,7 @@ export class ZKPassport {
    * @param purpose To explain what you want to do with the user's data
    * @param scope Scope this request to a specific use case
    * @param validity How many days ago should have the ID been last scanned by the user?
+   * @param devMode Whether to enable dev mode. This will allow you to verify mock proofs (i.e. from ZKR)
    * @returns The query builder object.
    */
   public async request({
@@ -695,6 +699,7 @@ export class ZKPassport {
     scope,
     mode,
     validity,
+    devMode,
     topicOverride,
     keyPairOverride,
   }: {
@@ -704,6 +709,7 @@ export class ZKPassport {
     scope?: string
     mode?: ProofMode
     validity?: number
+    devMode?: boolean
     topicOverride?: string
     keyPairOverride?: { privateKey: Uint8Array; publicKey: Uint8Array }
   }): Promise<QueryBuilder> {
@@ -723,6 +729,7 @@ export class ZKPassport {
       // Default to 6 months
       validity: validity || 6 * 30,
       mode: mode || "fast",
+      devMode: devMode || false,
     }
 
     this.onRequestReceivedCallbacks[topic] = []
@@ -2647,11 +2654,13 @@ export class ZKPassport {
     queryResult,
     validity,
     scope,
+    devMode = false,
   }: {
     proofs: Array<ProofResult>
     queryResult: QueryResult
     validity?: number
     scope?: string
+    devMode?: boolean
   }): Promise<{
     uniqueIdentifier: string | undefined
     verified: boolean
@@ -2683,6 +2692,15 @@ export class ZKPassport {
     uniqueIdentifier = uniqueIdentifierFromPublicInputs
     verified = isCorrect
     queryResultErrors = isCorrect ? undefined : queryResultErrorsFromPublicInputs
+    if (uniqueIdentifier && BigInt(uniqueIdentifier) === BigInt(0) && !devMode) {
+      // If the unique identifier is 0 and it is not in dev mode,
+      // the proofs are considered invalid as these are mock proofs only meant
+      // for testing purposes
+      verified = false
+      console.warn(
+        "You are trying to verify a mock proof. This is only allowed in dev mode. To enable dev mode, set the `devMode` parameter to `true` in the request function parameters.",
+      )
+    }
     // Only proceed with the proof verification if the public inputs are correct
     if (verified) {
       for (const proof of proofs) {
@@ -2706,6 +2724,7 @@ export class ZKPassport {
               validityPeriodInDays: validity,
               domain: this.domain,
               scope,
+              devMode,
             })
             const result = await client.readContract({
               address,
@@ -2763,7 +2782,7 @@ export class ZKPassport {
     if (network === "ethereum_sepolia") {
       return {
         ...baseConfig,
-        address: "0x8D3c9633990cE7f8462888d7491f8dD255D14F92",
+        address: "0x8c6982D77f7a8f60aE3133cA9b2FAA6f3e78c394",
       }
     } else if (network === "local_anvil") {
       return {
@@ -2779,11 +2798,13 @@ export class ZKPassport {
     validityPeriodInDays = 7,
     domain,
     scope,
+    devMode = false,
   }: {
     proof: ProofResult
     validityPeriodInDays?: number
     domain?: string
     scope?: string
+    devMode?: boolean
   }) {
     if (!proof.name?.startsWith("outer_evm")) {
       throw new Error(
@@ -2919,6 +2940,7 @@ export class ZKPassport {
       validityPeriodInDays,
       scope: domain ?? this.domain,
       subscope: scope ?? "",
+      devMode,
     }
     return params
   }
