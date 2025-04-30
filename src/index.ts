@@ -66,9 +66,10 @@ import { noLogger as logger } from "./logger"
 import { inflate } from "pako"
 import i18en from "i18n-iso-countries/langs/en.json"
 import { Buffer } from "buffer/"
-import { sha256 } from "@noble/hashes/sha256"
+import { sha256 } from "@noble/hashes/sha2"
 import { hexToBytes } from "@noble/hashes/utils"
 import ZKPassportVerifierAbi from "./assets/abi/ZKPassportVerifier.json"
+import { RegistryClient } from "@zkpassport/registry"
 
 const DEFAULT_DATE_VALUE = new Date(1111, 10, 11)
 
@@ -142,9 +143,12 @@ function hasRequestedAccessToField(credentialsRequest: Query, field: IDCredentia
 }
 
 function normalizeCountry(country: CountryName | Alpha3Code) {
-  let normalizedCountry: Alpha3Code | undefined
-  const alpha3 = getAlpha3Code(country, "en") as Alpha3Code | undefined
-  normalizedCountry = alpha3 || (country as Alpha3Code)
+  if (country === "Zero Knowledge Republic") {
+    return "ZKR"
+  }
+  let normalizedCountry: Alpha3Code | "ZKR" | undefined
+  const alpha3 = getAlpha3Code(country as CountryName, "en") as Alpha3Code | "ZKR" | undefined
+  normalizedCountry = alpha3 || (country as Alpha3Code) || "ZKR"
   return normalizedCountry
 }
 
@@ -1792,6 +1796,38 @@ export class ZKPassport {
     return { isCorrect, queryResultErrors }
   }
 
+  private async checkCertificateRegistryRoot(
+    root: string,
+    queryResultErrors: any,
+    outer?: boolean,
+  ) {
+    let isCorrect = true
+    try {
+      // Maintained certificate registry settled onchain
+      // Here we use Ethereum Sepolia
+      const registryClient = new RegistryClient({ chainId: 11155111 })
+      await registryClient.getCertificates(`0x${root}`)
+    } catch (error) {
+      console.warn(error)
+      // Check the legacy static roots that were used before the registry was deployed onchain
+      const VALID_CERTIFICATE_REGISTRY_ROOT = [
+        BigInt("20192042006788880778219739574377003123593792072535937278552252195461520776494"),
+        BigInt("21301853597069384763054217328384418971999152625381818922211526730996340553696"),
+        BigInt("10839898448097753834842514286432152806152415606387598803678317315409344029817"),
+      ]
+      if (!VALID_CERTIFICATE_REGISTRY_ROOT.includes(BigInt(root))) {
+        console.warn("The ID was signed by an unrecognized root certificate")
+        isCorrect = false
+        queryResultErrors[outer ? "outer" : "sig_check_dsc"].certificate = {
+          expected: `A valid root from ZKPassport Registry`,
+          received: `Got invalid certificate registry root: ${root}`,
+          message: "The ID was signed by an unrecognized root certificate",
+        }
+      }
+    }
+    return { isCorrect, queryResultErrors }
+  }
+
   private async checkPublicInputs(
     proofs: Array<ProofResult>,
     queryResult: QueryResult,
@@ -1802,11 +1838,6 @@ export class ZKPassport {
     let commitmentOut: bigint | undefined
     let isCorrect = true
     let uniqueIdentifier: string | undefined
-    const VALID_CERTIFICATE_REGISTRY_ROOT = [
-      BigInt("20192042006788880778219739574377003123593792072535937278552252195461520776494"),
-      BigInt("21301853597069384763054217328384418971999152625381818922211526730996340553696"),
-      BigInt("10839898448097753834842514286432152806152415606387598803678317315409344029817"),
-    ]
     const currentTime = new Date()
     const today = new Date(
       currentTime.getFullYear(),
@@ -1864,14 +1895,18 @@ export class ZKPassport {
       if (proof.name?.startsWith("outer")) {
         const isForEVM = proof.name?.startsWith("outer_evm")
         const certificateRegistryRoot = getCertificateRegistryRootFromOuterProof(proofData)
-        if (!VALID_CERTIFICATE_REGISTRY_ROOT.includes(certificateRegistryRoot)) {
-          console.warn("The ID was signed by an unrecognized root certificate")
-          isCorrect = false
-          queryResultErrors.outer.certificate = {
-            expected: `Certificate registry root: ${VALID_CERTIFICATE_REGISTRY_ROOT.join(", ")}`,
-            received: `Certificate registry root: ${certificateRegistryRoot.toString()}`,
-            message: "The ID was signed by an unrecognized root certificate",
-          }
+        const {
+          isCorrect: isCorrectCertificateRegistryRoot,
+          queryResultErrors: queryResultErrorsCertificateRegistryRoot,
+        } = await this.checkCertificateRegistryRoot(
+          certificateRegistryRoot.toString(16),
+          queryResultErrors,
+          true,
+        )
+        isCorrect = isCorrect && isCorrectCertificateRegistryRoot
+        queryResultErrors = {
+          ...queryResultErrors,
+          ...queryResultErrorsCertificateRegistryRoot,
         }
         const currentDate = getCurrentDateFromOuterProof(proofData)
         const todayToCurrentDate = today.getTime() - currentDate.getTime()
@@ -2168,14 +2203,18 @@ export class ZKPassport {
       } else if (proof.name?.startsWith("sig_check_dsc")) {
         commitmentOut = getCommitmentFromDSCProof(proofData)
         const merkleRoot = getMerkleRootFromDSCProof(proofData)
-        if (!VALID_CERTIFICATE_REGISTRY_ROOT.includes(merkleRoot)) {
-          console.warn("The ID was signed by an unrecognized root certificate")
-          isCorrect = false
-          queryResultErrors.sig_check_dsc.certificate = {
-            expected: `Certificate registry root: ${VALID_CERTIFICATE_REGISTRY_ROOT.join(", ")}`,
-            received: `Certificate registry root: ${merkleRoot.toString()}`,
-            message: "The ID was signed by an unrecognized root certificate",
-          }
+        const {
+          isCorrect: isCorrectCertificateRegistryRoot,
+          queryResultErrors: queryResultErrorsCertificateRegistryRoot,
+        } = await this.checkCertificateRegistryRoot(
+          merkleRoot.toString(16),
+          queryResultErrors,
+          false,
+        )
+        isCorrect = isCorrect && isCorrectCertificateRegistryRoot
+        queryResultErrors = {
+          ...queryResultErrors,
+          ...queryResultErrorsCertificateRegistryRoot,
         }
       } else if (proof.name?.startsWith("sig_check_id_data")) {
         commitmentIn = getCommitmentInFromIDDataProof(proofData)
@@ -2724,7 +2763,7 @@ export class ZKPassport {
     if (network === "ethereum_sepolia") {
       return {
         ...baseConfig,
-        address: "0x21E12Fa30a1F98699F242ac062Db4a8e7b344B5d",
+        address: "0x8D3c9633990cE7f8462888d7491f8dD255D14F92",
       }
     } else if (network === "local_anvil") {
       return {
