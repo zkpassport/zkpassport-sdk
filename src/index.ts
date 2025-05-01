@@ -2787,7 +2787,7 @@ export class ZKPassport {
     } else if (network === "local_anvil") {
       return {
         ...baseConfig,
-        address: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+        address: "0x0",
       }
     }
     throw new Error(`Unsupported network: ${network}`)
