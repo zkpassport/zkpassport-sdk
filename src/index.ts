@@ -1,4 +1,3 @@
-import { randomBytes } from "crypto"
 import { Alpha3Code, getAlpha3Code, registerLocale } from "i18n-iso-countries"
 import {
   type DisclosableIDCredential,
@@ -59,9 +58,6 @@ import {
   getSubscopeFromOuterProof,
 } from "@zkpassport/utils"
 import { bytesToHex } from "@noble/ciphers/utils"
-import { getWebSocketClient, WebSocketClient } from "./websocket"
-import { createEncryptedJsonRpcRequest } from "./json-rpc"
-import { decrypt, generateECDHKeyPair, getSharedSecret } from "./encryption"
 import { noLogger as logger } from "./logger"
 import { inflate } from "pako"
 import i18en from "i18n-iso-countries/langs/en.json"
@@ -70,6 +66,7 @@ import { sha256 } from "@noble/hashes/sha2"
 import { hexToBytes } from "@noble/hashes/utils"
 import ZKPassportVerifierAbi from "./assets/abi/ZKPassportVerifier.json"
 import { RegistryClient } from "@zkpassport/registry"
+import { Bridge, BridgeInterface } from "@obsidion/bridge"
 
 const DEFAULT_DATE_VALUE = new Date(1111, 10, 11)
 
@@ -351,9 +348,8 @@ export class ZKPassport {
       devMode: boolean
     }
   > = {}
-  private topicToKeyPair: Record<string, { privateKey: Uint8Array; publicKey: Uint8Array }> = {}
-  private topicToWebSocketClient: Record<string, WebSocketClient> = {}
-  private topicToSharedSecret: Record<string, Uint8Array> = {}
+  private topicToPublicKey: Record<string, string> = {}
+  private topicToBridge: Record<string, BridgeInterface> = {}
   private topicToRequestReceived: Record<string, boolean> = {}
   private topicToService: Record<
     string,
@@ -498,11 +494,7 @@ export class ZKPassport {
    * @param request The request.
    * @param outerRequest The outer request.
    */
-  private async handleEncryptedMessage(
-    topic: string,
-    request: JsonRpcRequest,
-    outerRequest: JsonRpcRequest,
-  ) {
+  private async handleEncryptedMessage(topic: string, request: JsonRpcRequest) {
     logger.debug("Received encrypted message:", request)
     if (request.method === "accept") {
       logger.debug(`User accepted the request and is generating a proof`)
@@ -651,7 +643,7 @@ export class ZKPassport {
         const base64Service = Buffer.from(JSON.stringify(this.topicToService[topic])).toString(
           "base64",
         )
-        const pubkey = bytesToHex(this.topicToKeyPair[topic].publicKey)
+        const pubkey = this.topicToPublicKey[topic]
         this.setExpectedProofCount(topic)
         return {
           url: `https://zkpassport.id/r?d=${this.domain}&t=${topic}&c=${base64Config}&s=${base64Service}&p=${pubkey}&m=${this.topicToLocalConfig[topic].mode}`,
@@ -675,7 +667,7 @@ export class ZKPassport {
           onReject: (callback: () => void) => this.onRejectCallbacks[topic].push(callback),
           onError: (callback: (error: string) => void) =>
             this.onErrorCallbacks[topic].push(callback),
-          isBridgeConnected: () => this.topicToWebSocketClient[topic].readyState === WebSocket.OPEN,
+          isBridgeConnected: () => this.topicToBridge[topic].isBridgeConnected(),
           requestReceived: () => this.topicToRequestReceived[topic] === true,
         }
       },
@@ -713,13 +705,12 @@ export class ZKPassport {
     topicOverride?: string
     keyPairOverride?: { privateKey: Uint8Array; publicKey: Uint8Array }
   }): Promise<QueryBuilder> {
-    const topic = topicOverride || randomBytes(16).toString("hex")
+    const bridge = await Bridge.create({
+      keyPair: keyPairOverride,
+      bridgeId: topicOverride,
+    })
 
-    const keyPair = keyPairOverride || (await generateECDHKeyPair())
-    this.topicToKeyPair[topic] = {
-      privateKey: keyPair.privateKey,
-      publicKey: keyPair.publicKey,
-    }
+    const topic = bridge.connection.getBridgeId()
 
     this.topicToConfig[topic] = {}
     this.topicToService[topic] = { name, logo, purpose, scope }
@@ -740,68 +731,22 @@ export class ZKPassport {
     this.onRejectCallbacks[topic] = []
     this.onErrorCallbacks[topic] = []
 
-    const wsClient = getWebSocketClient(`wss://bridge.zkpassport.id?topic=${topic}`, this.domain)
-    this.topicToWebSocketClient[topic] = wsClient
-    wsClient.onopen = async () => {
-      logger.info("[frontend] WebSocket connection established")
+    this.topicToPublicKey[topic] = bridge.getPublicKey()
+
+    this.topicToBridge[topic] = bridge
+    bridge.onConnect(async (reconnection: boolean) => {
+      logger.debug("Bridge connected")
+      logger.debug("Is reconnection:", reconnection)
       await Promise.all(this.onBridgeConnectCallbacks[topic].map((callback) => callback()))
-    }
-    wsClient.addEventListener("message", async (event: any) => {
-      logger.debug("[frontend] Received message:", event.data)
-      try {
-        const data: JsonRpcRequest = JSON.parse(event.data)
-        // Handshake happens when the mobile app scans the QR code and connects to the bridge
-        if (data.method === "handshake") {
-          logger.debug("[frontend] Received handshake:", event.data)
-
-          this.topicToRequestReceived[topic] = true
-          this.topicToSharedSecret[topic] = await getSharedSecret(
-            bytesToHex(keyPair.privateKey),
-            data.params.pubkey,
-          )
-          logger.debug(
-            "[frontend] Shared secret:",
-            Buffer.from(this.topicToSharedSecret[topic]).toString("hex"),
-          )
-
-          const encryptedMessage = await createEncryptedJsonRpcRequest(
-            "hello",
-            null,
-            this.topicToSharedSecret[topic],
-            topic,
-          )
-          logger.debug("[frontend] Sending encrypted message:", encryptedMessage)
-          wsClient.send(JSON.stringify(encryptedMessage))
-
-          await Promise.all(this.onRequestReceivedCallbacks[topic].map((callback) => callback()))
-          return
-        }
-
-        // Handle encrypted messages
-        if (data.method === "encryptedMessage") {
-          // Decode the payload from base64 to Uint8Array
-          const payload = new Uint8Array(
-            atob(data.params.payload)
-              .split("")
-              .map((c) => c.charCodeAt(0)),
-          )
-          try {
-            // Decrypt the payload using the shared secret
-            const decrypted = await decrypt(payload, this.topicToSharedSecret[topic], topic)
-            const decryptedJson: JsonRpcRequest = JSON.parse(decrypted)
-            this.handleEncryptedMessage(topic, decryptedJson, data)
-          } catch (error) {
-            logger.error("[frontend] Error decrypting message:", error)
-          }
-          return
-        }
-      } catch (error) {
-        logger.error("[frontend] Error:", error)
-      }
     })
-    wsClient.onerror = (error: Event) => {
-      logger.error("[frontend] WebSocket error:", error)
-    }
+    bridge.onSecureChannelEstablished(async () => {
+      logger.debug("Secure channel established")
+      await Promise.all(this.onRequestReceivedCallbacks[topic].map((callback) => callback()))
+    })
+    bridge.onSecureMessage(async (message: any) => {
+      logger.debug("Received message:", message)
+      this.handleEncryptedMessage(topic, message)
+    })
     return this.getZkPassportRequest(topic)
   }
 
@@ -2959,7 +2904,7 @@ export class ZKPassport {
    * @returns The URL of the request.
    */
   public getUrl(requestId: string) {
-    const pubkey = bytesToHex(this.topicToKeyPair[requestId].publicKey)
+    const pubkey = this.topicToPublicKey[requestId]
     const base64Config = Buffer.from(JSON.stringify(this.topicToConfig[requestId])).toString(
       "base64",
     )
@@ -2974,14 +2919,13 @@ export class ZKPassport {
    * @param requestId The request ID.
    */
   public cancelRequest(requestId: string) {
-    if (this.topicToWebSocketClient[requestId]) {
-      this.topicToWebSocketClient[requestId].close()
-      delete this.topicToWebSocketClient[requestId]
+    if (this.topicToBridge[requestId]) {
+      this.topicToBridge[requestId].close()
+      delete this.topicToBridge[requestId]
     }
-    delete this.topicToKeyPair[requestId]
+    delete this.topicToPublicKey[requestId]
     delete this.topicToConfig[requestId]
     delete this.topicToLocalConfig[requestId]
-    delete this.topicToSharedSecret[requestId]
     delete this.topicToProofs[requestId]
     delete this.topicToExpectedProofCount[requestId]
     delete this.topicToFailedProofCount[requestId]
@@ -2998,7 +2942,7 @@ export class ZKPassport {
    * @notice Clears all requests.
    */
   public clearAllRequests() {
-    for (const requestId in this.topicToWebSocketClient) {
+    for (const requestId in this.topicToBridge) {
       this.cancelRequest(requestId)
     }
   }
