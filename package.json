@@ -44,7 +44,7 @@
     "@noble/secp256k1": "^2.2.3",
     "@obsidion/bridge": "^0.7.0",
     "@zkpassport/registry": "^0.1.9",
-    "@zkpassport/utils": "^0.8.0",
+    "@zkpassport/utils": "^0.8.2",
     "buffer": "^6.0.3",
     "i18n-iso-countries": "^7.12.0",
     "pako": "^2.1.0",

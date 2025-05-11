@@ -56,6 +56,7 @@ import {
   ProofData,
   getScopeFromOuterProof,
   getSubscopeFromOuterProof,
+  getServiceScopeHash,
 } from "@zkpassport/utils"
 import { bytesToHex } from "@noble/ciphers/utils"
 import { noLogger as logger } from "./logger"
@@ -353,7 +354,7 @@ export class ZKPassport {
   private topicToRequestReceived: Record<string, boolean> = {}
   private topicToService: Record<
     string,
-    { name: string; logo: string; purpose: string; scope?: string }
+    { name: string; logo: string; purpose: string; scope?: string; chainId?: number }
   > = {}
   private topicToProofs: Record<string, Array<ProofResult>> = {}
   private topicToExpectedProofCount: Record<string, number> = {}
@@ -396,6 +397,7 @@ export class ZKPassport {
       queryResult: result,
       validity: this.topicToLocalConfig[topic]?.validity,
       scope: this.topicToService[topic]?.scope,
+      chainId: this.topicToService[topic]?.chainId,
       devMode: this.topicToLocalConfig[topic]?.devMode,
     })
     delete this.topicToProofs[topic]
@@ -660,6 +662,7 @@ export class ZKPassport {
    * @param scope Scope this request to a specific use case
    * @param validity How many days ago should have the ID been last scanned by the user?
    * @param devMode Whether to enable dev mode. This will allow you to verify mock proofs (i.e. from ZKR)
+   * @param chainId The chain ID to use for the request (if using the proof onchain)
    * @returns The query builder object.
    */
   public async request({
@@ -668,6 +671,7 @@ export class ZKPassport {
     purpose,
     scope,
     mode,
+    chainId,
     validity,
     devMode,
     topicOverride,
@@ -678,6 +682,7 @@ export class ZKPassport {
     purpose: string
     scope?: string
     mode?: ProofMode
+    chainId?: number
     validity?: number
     devMode?: boolean
     topicOverride?: string
@@ -691,7 +696,7 @@ export class ZKPassport {
     const topic = bridge.connection.getBridgeId()
 
     this.topicToConfig[topic] = {}
-    this.topicToService[topic] = { name, logo, purpose, scope }
+    this.topicToService[topic] = { name, logo, purpose, scope, chainId }
     this.topicToProofs[topic] = []
     this.topicToExpectedProofCount[topic] = 0
     this.topicToLocalConfig[topic] = {
@@ -1703,13 +1708,17 @@ export class ZKPassport {
     queryResultErrors: QueryResultErrors,
     key: string,
     scope?: string,
+    chainId?: number,
   ) {
     let isCorrect = true
-    if (this.domain && getScopeHash(this.domain) !== BigInt(proofData.publicInputs[1])) {
+    if (
+      this.domain &&
+      getServiceScopeHash(this.domain, chainId) !== BigInt(proofData.publicInputs[1])
+    ) {
       console.warn("The proof comes from a different domain than the one expected")
       isCorrect = false
       queryResultErrors[key as keyof QueryResultErrors].scope = {
-        expected: `Scope: ${getScopeHash(this.domain).toString()}`,
+        expected: `Scope: ${getServiceScopeHash(this.domain, chainId).toString()}`,
         received: `Scope: ${BigInt(proofData.publicInputs[1]).toString()}`,
         message: "The proof comes from a different domain than the one expected",
       }
@@ -1763,6 +1772,7 @@ export class ZKPassport {
     queryResult: QueryResult,
     validity?: number,
     scope?: string,
+    chainId?: number,
   ) {
     let commitmentIn: bigint | undefined
     let commitmentOut: bigint | undefined
@@ -1868,11 +1878,14 @@ export class ZKPassport {
             message: "The proof does not verify all the requested conditions and information",
           }
         }
-        if (this.domain && getScopeHash(this.domain) !== getScopeFromOuterProof(proofData)) {
+        if (
+          this.domain &&
+          getServiceScopeHash(this.domain, chainId) !== getScopeFromOuterProof(proofData)
+        ) {
           console.warn("The proof comes from a different domain than the one expected")
           isCorrect = false
           queryResultErrors.outer.scope = {
-            expected: `Scope: ${getScopeHash(this.domain).toString()}`,
+            expected: `Scope: ${getServiceScopeHash(this.domain, chainId).toString()}`,
             received: `Scope: ${getScopeFromOuterProof(proofData).toString()}`,
             message: "The proof comes from a different domain than the one expected",
           }
@@ -2569,6 +2582,9 @@ export class ZKPassport {
    * @param proofs The proofs to verify.
    * @param queryResult The query result to verify against
    * @param validity How many days ago should have the ID been last scanned by the user?
+   * @param scope Scope this request to a specific use case
+   * @param chainId The chain ID to use for the verification (if using the proof onchain)
+   * @param devMode Whether to enable dev mode. This will allow you to verify mock proofs (i.e. from ZKR)
    * @returns An object containing the unique identifier associated to the user
    * and a boolean indicating whether the proofs were successfully verified.
    */
@@ -2577,12 +2593,14 @@ export class ZKPassport {
     queryResult,
     validity,
     scope,
+    chainId,
     devMode = false,
   }: {
     proofs: Array<ProofResult>
     queryResult: QueryResult
     validity?: number
     scope?: string
+    chainId?: number
     devMode?: boolean
   }): Promise<{
     uniqueIdentifier: string | undefined
@@ -2654,6 +2672,7 @@ export class ZKPassport {
               proof,
               validityPeriodInDays: validity,
               domain: this.domain,
+              chainId,
               scope,
               devMode,
             })
@@ -2729,12 +2748,14 @@ export class ZKPassport {
     validityPeriodInDays = 7,
     domain,
     scope,
+    chainId,
     devMode = false,
   }: {
     proof: ProofResult
     validityPeriodInDays?: number
     domain?: string
     scope?: string
+    chainId?: number
     devMode?: boolean
   }) {
     if (!proof.name?.startsWith("outer_evm")) {
