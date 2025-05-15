@@ -122,6 +122,24 @@ export type SolidityVerifierParameters = {
 
 export type EVMChain = "ethereum_sepolia" | "local_anvil"
 
+function getChainIdFromEVMChain(chain: EVMChain): number {
+  if (chain === "ethereum_sepolia") {
+    return 11155111
+  } else if (chain === "local_anvil") {
+    return 31337
+  }
+  throw new Error(`Unsupported chain: ${chain}`)
+}
+
+function getEVMChainFromChainId(chainId: number): EVMChain {
+  if (chainId === 11155111) {
+    return "ethereum_sepolia"
+  } else if (chainId === 31337) {
+    return "local_anvil"
+  }
+  throw new Error(`Unsupported chain ID: ${chainId}`)
+}
+
 registerLocale(i18en)
 
 function hasRequestedAccessToField(credentialsRequest: Query, field: IDCredential): boolean {
@@ -397,7 +415,9 @@ export class ZKPassport {
       queryResult: result,
       validity: this.topicToLocalConfig[topic]?.validity,
       scope: this.topicToService[topic]?.scope,
-      chainId: this.topicToService[topic]?.chainId,
+      evmChain: this.topicToService[topic]?.chainId
+        ? getEVMChainFromChainId(this.topicToService[topic]?.chainId)
+        : undefined,
       devMode: this.topicToLocalConfig[topic]?.devMode,
     })
     delete this.topicToProofs[topic]
@@ -662,7 +682,7 @@ export class ZKPassport {
    * @param scope Scope this request to a specific use case
    * @param validity How many days ago should have the ID been last scanned by the user?
    * @param devMode Whether to enable dev mode. This will allow you to verify mock proofs (i.e. from ZKR)
-   * @param chainId The chain ID to use for the request (if using the proof onchain)
+   * @param evmChain The EVM chain to use for the request (if using the proof onchain)
    * @returns The query builder object.
    */
   public async request({
@@ -671,7 +691,7 @@ export class ZKPassport {
     purpose,
     scope,
     mode,
-    chainId,
+    evmChain,
     validity,
     devMode,
     topicOverride,
@@ -682,7 +702,7 @@ export class ZKPassport {
     purpose: string
     scope?: string
     mode?: ProofMode
-    chainId?: number
+    evmChain?: EVMChain
     validity?: number
     devMode?: boolean
     topicOverride?: string
@@ -696,7 +716,13 @@ export class ZKPassport {
     const topic = bridge.connection.getBridgeId()
 
     this.topicToConfig[topic] = {}
-    this.topicToService[topic] = { name, logo, purpose, scope, chainId }
+    this.topicToService[topic] = {
+      name,
+      logo,
+      purpose,
+      scope,
+      chainId: evmChain ? getChainIdFromEVMChain(evmChain) : undefined,
+    }
     this.topicToProofs[topic] = []
     this.topicToExpectedProofCount[topic] = 0
     this.topicToLocalConfig[topic] = {
@@ -2583,7 +2609,7 @@ export class ZKPassport {
    * @param queryResult The query result to verify against
    * @param validity How many days ago should have the ID been last scanned by the user?
    * @param scope Scope this request to a specific use case
-   * @param chainId The chain ID to use for the verification (if using the proof onchain)
+   * @param evmChain The EVM chain to use for the verification (if using the proof onchain)
    * @param devMode Whether to enable dev mode. This will allow you to verify mock proofs (i.e. from ZKR)
    * @returns An object containing the unique identifier associated to the user
    * and a boolean indicating whether the proofs were successfully verified.
@@ -2593,14 +2619,14 @@ export class ZKPassport {
     queryResult,
     validity,
     scope,
-    chainId,
+    evmChain,
     devMode = false,
   }: {
     proofs: Array<ProofResult>
     queryResult: QueryResult
     validity?: number
     scope?: string
-    chainId?: number
+    evmChain?: EVMChain
     devMode?: boolean
   }): Promise<{
     uniqueIdentifier: string | undefined
@@ -2633,11 +2659,12 @@ export class ZKPassport {
     let verified = true
     let uniqueIdentifier: string | undefined
     let queryResultErrors: QueryResultErrors | undefined
+    const chainId = evmChain ? getChainIdFromEVMChain(evmChain) : undefined
     const {
       isCorrect,
       uniqueIdentifier: uniqueIdentifierFromPublicInputs,
       queryResultErrors: queryResultErrorsFromPublicInputs,
-    } = await this.checkPublicInputs(proofs, formattedResult, validity, scope)
+    } = await this.checkPublicInputs(proofs, formattedResult, validity, scope, chainId)
     uniqueIdentifier = uniqueIdentifierFromPublicInputs
     verified = isCorrect
     queryResultErrors = isCorrect ? undefined : queryResultErrorsFromPublicInputs
@@ -2672,7 +2699,6 @@ export class ZKPassport {
               proof,
               validityPeriodInDays: validity,
               domain: this.domain,
-              chainId,
               scope,
               devMode,
             })
@@ -2732,7 +2758,7 @@ export class ZKPassport {
     if (network === "ethereum_sepolia") {
       return {
         ...baseConfig,
-        address: "0x8c6982D77f7a8f60aE3133cA9b2FAA6f3e78c394",
+        address: "0xDfE02DFd5c208854884B58bFf6522De5c42F73E3",
       }
     } else if (network === "local_anvil") {
       return {
@@ -2748,14 +2774,12 @@ export class ZKPassport {
     validityPeriodInDays = 7,
     domain,
     scope,
-    chainId,
     devMode = false,
   }: {
     proof: ProofResult
     validityPeriodInDays?: number
     domain?: string
     scope?: string
-    chainId?: number
     devMode?: boolean
   }) {
     if (!proof.name?.startsWith("outer_evm")) {
