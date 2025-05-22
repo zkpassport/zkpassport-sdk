@@ -43,7 +43,7 @@
     "@noble/hashes": "^1.7.2",
     "@noble/secp256k1": "^2.2.3",
     "@obsidion/bridge": "^0.10.0",
-    "@zkpassport/registry": "^0.1.9",
+    "@zkpassport/registry": "^0.2.0",
     "@zkpassport/utils": "^0.9.6",
     "buffer": "^6.0.3",
     "i18n-iso-countries": "^7.12.0",
