@@ -3057,7 +3057,7 @@ export class ZKPassport {
       }
       committedInputs.push({ circuitName, inputs: compressedCommittedInputs })
     }
-    const parameterCommitments = proofData.publicInputs.slice(11, proofData.publicInputs.length - 1)
+    const parameterCommitments = proofData.publicInputs.slice(12, proofData.publicInputs.length - 1)
     let compressedCommittedInputs = ""
     let committedInputCountsArray = []
     for (const commitment of parameterCommitments) {
