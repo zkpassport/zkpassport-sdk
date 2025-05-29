@@ -2934,7 +2934,7 @@ export class ZKPassport {
     if (network === "ethereum_sepolia") {
       return {
         ...baseConfig,
-        address: "0x5e4B11F7B7995F5Cee0134692a422b045091112F",
+        address: "0xEE9F10f38319eAE2730dBa28fB09081dB806c5E5",
       }
     } else if (network === "local_anvil") {
       return {
