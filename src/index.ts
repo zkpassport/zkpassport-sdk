@@ -76,7 +76,7 @@ import ZKPassportVerifierAbi from "./assets/abi/ZKPassportVerifier.json"
 import { RegistryClient } from "@zkpassport/registry"
 import { Bridge, BridgeInterface } from "@obsidion/bridge"
 
-const VERSION = "0.5.3"
+const VERSION = "0.5.5"
 
 const DEFAULT_DATE_VALUE = new Date(1111, 10, 11)
 
